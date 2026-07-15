@@ -260,22 +260,55 @@ def _read_uri_text(activity, uri):
 
 
 def _copy_uri_to_file(activity, uri, dest_path):
-    """محتوای یک URI را (به‌صورت بایت) در یک فایل محلی کپی می‌کند.
-    برای فایل‌های باینری مثل ZIP هم کار می‌کند."""
+    """محتوای یک URI را در یک فایل محلی کپی می‌کند (باینری‌امن، مناسب ZIP).
+    کپی کاملاً سمت جاوا انجام می‌شود تا بایت‌ها سالم بمانند."""
+    from jnius import autoclass
     resolver = activity.getContentResolver()
+    FileOutputStream = autoclass('java.io.FileOutputStream')
+    # روش ۱: android.os.FileUtils.copy (اندروید ۱۰+) — مطمئن‌ترین
+    try:
+        FileUtils = autoclass('android.os.FileUtils')
+        istream = resolver.openInputStream(uri)
+        if istream is None:
+            raise IOError('input stream is null')
+        ostream = FileOutputStream(dest_path)
+        try:
+            FileUtils.copy(istream, ostream)
+        finally:
+            try:
+                ostream.flush()
+                ostream.close()
+            except Exception:
+                pass
+            try:
+                istream.close()
+            except Exception:
+                pass
+        return dest_path
+    except Exception:
+        pass
+    # روش ۲ (جایگزین): کپی بایت‌به‌بایت با بافر جاوا
     istream = resolver.openInputStream(uri)
     if istream is None:
         raise IOError('input stream is null')
+    BufferedInputStream = autoclass('java.io.BufferedInputStream')
+    bis = BufferedInputStream(istream, 65536)
+    ostream = FileOutputStream(dest_path)
     try:
-        with open(dest_path, 'wb') as f:
-            buf = bytearray(65536)
-            while True:
-                n = istream.read(buf)
-                if n == -1:
-                    break
-                if n > 0:
-                    f.write(bytes(buf[:n]))
+        b = bis.read()
+        while b != -1:
+            ostream.write(b)
+            b = bis.read()
     finally:
+        try:
+            ostream.flush()
+            ostream.close()
+        except Exception:
+            pass
+        try:
+            bis.close()
+        except Exception:
+            pass
         try:
             istream.close()
         except Exception:
@@ -295,47 +328,65 @@ def pick_file(on_file, mime='*/*'):
         _desktop_pick_file(on_file)
 
 
-def _android_pick_file(on_file, mime='*/*'):
-    from jnius import autoclass
-    from android import activity as _act
-    from kivy.clock import Clock
-    import os as _os
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-    Intent = autoclass('android.content.Intent')
-    String = autoclass('java.lang.String')
-    activity = PythonActivity.mActivity
-    REQUEST = 0x4A54
-
-    def _cb(path, msg):
-        Clock.schedule_once(lambda dt: on_file(path, msg), 0)
-
-    def _on_result(request, result, intent):
-        if request != REQUEST:
-            return
-        try:
-            _act.unbind(on_activity_result=_on_result)
-        except Exception:
-            pass
-        if result != -1 or intent is None:   # Activity.RESULT_OK == -1
-            _cb(None, 'انتخاب فایل لغو شد.')
-            return
-        try:
-            uri = intent.getData()
+def ensure_all_files_access():
+    """در اندروید ۱۱+ برای خواندن فایل‌های دلخواه (مثل ZIP در Download) به
+    دسترسی «همهٔ فایل‌ها» نیاز است. اگر نباشد، صفحهٔ تنظیمات باز می‌شود.
+    True یعنی دسترسی هست؛ False یعنی از کاربر خواسته شد."""
+    if platform != 'android':
+        return True
+    try:
+        from jnius import autoclass
+        VERSION = autoclass('android.os.Build$VERSION')
+        if VERSION.SDK_INT < 30:
+            # اندروید ۱۰ و پایین‌تر: مجوز معمولی کافی است
             try:
-                cache_dir = activity.getCacheDir().getAbsolutePath()
+                from android.permissions import request_permissions, Permission
+                request_permissions([Permission.READ_EXTERNAL_STORAGE,
+                                     Permission.WRITE_EXTERNAL_STORAGE])
             except Exception:
-                cache_dir = '/sdcard'
-            dest = _os.path.join(cache_dir, 'import_picked.bin')
-            _copy_uri_to_file(activity, uri, dest)
-            _cb(dest, '')
-        except Exception as e:
-            _cb(None, 'خواندن فایل ممکن نشد: %s' % e)
+                pass
+            return True
+        Environment = autoclass('android.os.Environment')
+        if Environment.isExternalStorageManager():
+            return True
+        # باز کردن صفحهٔ «دسترسی به همهٔ فایل‌ها» برای این برنامه
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        Intent = autoclass('android.content.Intent')
+        Settings = autoclass('android.provider.Settings')
+        Uri = autoclass('android.net.Uri')
+        activity = PythonActivity.mActivity
+        try:
+            intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.setData(Uri.parse('package:' + activity.getPackageName()))
+            activity.startActivity(intent)
+        except Exception:
+            intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            activity.startActivity(intent)
+        return False
+    except Exception:
+        return True
 
-    _act.bind(on_activity_result=_on_result)
-    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-    intent.addCategory(Intent.CATEGORY_OPENABLE)
-    intent.setType(String(mime))
-    activity.startActivityForResult(intent, REQUEST)
+
+def _android_pick_file(on_file, mime='*/*'):
+    # روی برخی گوشی‌ها انتخاب‌گر سیستمی (SAF) هنگام بازگشت برنامه را می‌بندد.
+    # به‌جای آن از یک مرورگر فایل درون‌برنامه‌ای استفاده می‌کنیم که کرش نمی‌کند.
+    import os
+    granted = True
+    try:
+        granted = ensure_all_files_access()
+    except Exception:
+        pass
+    if not granted:
+        on_file(None, 'لطفاً در صفحه‌ای که باز شد، دسترسی «همهٔ فایل‌ها» را برای این برنامه فعال کنید، سپس دوباره دکمهٔ انتخاب فایل را بزنید.')
+        return
+    start = '/storage/emulated/0'
+    if not os.path.isdir(start):
+        for cand in ('/sdcard', os.path.expanduser('~')):
+            if os.path.isdir(cand):
+                start = cand
+                break
+    _desktop_browse(on_file, exts=('.json', '.zip'),
+                    title='انتخاب فایل ZIP یا JSON', want_path=True, start_dir=start)
 
 
 def _android_pick_text(on_text, mime='application/json'):
@@ -375,7 +426,7 @@ def _android_pick_text(on_text, mime='application/json'):
     activity.startActivityForResult(intent, REQUEST)
 
 
-def _desktop_browse(deliver, exts=('.json',), title='انتخاب فایل', want_path=False):
+def _desktop_browse(deliver, exts=('.json',), title='انتخاب فایل', want_path=False, start_dir=None):
     """مرورگر فایل ساده و فارسی‌خوان برای دسکتاپ (همهٔ نام‌ها با rtl شکل‌دهی می‌شوند).
     اگر want_path=True باشد مسیر فایل انتخاب‌شده برگردانده می‌شود، وگرنه متن آن."""
     import os
@@ -396,7 +447,8 @@ def _desktop_browse(deliver, exts=('.json',), title='انتخاب فایل', wan
         _r = lambda x: x
 
     exts = tuple(x.lower() for x in exts)
-    state = {'cwd': os.path.expanduser('~')}
+    _start = start_dir if (start_dir and os.path.isdir(start_dir)) else os.path.expanduser('~')
+    state = {'cwd': _start}
     root = BoxLayout(orientation='vertical', spacing=6, padding=6)
     path_lbl = Label(text='', font_name='ui', size_hint_y=None, height=dp(30),
                      halign='right', valign='middle', shorten=True)
@@ -438,6 +490,11 @@ def _desktop_browse(deliver, exts=('.json',), title='انتخاب فایل', wan
         path_lbl.text = _r('پوشه: ' + path)
         grid.clear_widgets()
         grid.add_widget(_btn('.. (بازگشت به پوشهٔ بالا)', _go_up, bg=(0.16, 0.18, 0.24, 1)))
+        for _lbl, _sp in (('⬇  Download', '/storage/emulated/0/Download'),
+                          ('📄  Documents', '/storage/emulated/0/Documents'),
+                          ('🏠  حافظهٔ داخلی', '/storage/emulated/0')):
+            if os.path.isdir(_sp) and os.path.abspath(_sp) != os.path.abspath(path):
+                grid.add_widget(_btn(_lbl, lambda pp=_sp: _list(pp), bg=(0.12, 0.20, 0.30, 1)))
         try:
             entries = sorted(os.listdir(path), key=lambda x: x.lower())
         except Exception as e:
