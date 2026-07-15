@@ -20,7 +20,7 @@ fullscreen = 0
 presplash.filename = %(source.dir)s/bg.jpg
 android.presplash_color = #0d1424
 
-android.permissions = INTERNET
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
 
 android.api = 34
 android.minapi = 24
