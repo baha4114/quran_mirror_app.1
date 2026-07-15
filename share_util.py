@@ -259,6 +259,85 @@ def _read_uri_text(activity, uri):
     return sb.toString()
 
 
+def _copy_uri_to_file(activity, uri, dest_path):
+    """محتوای یک URI را (به‌صورت بایت) در یک فایل محلی کپی می‌کند.
+    برای فایل‌های باینری مثل ZIP هم کار می‌کند."""
+    resolver = activity.getContentResolver()
+    istream = resolver.openInputStream(uri)
+    if istream is None:
+        raise IOError('input stream is null')
+    try:
+        with open(dest_path, 'wb') as f:
+            buf = bytearray(65536)
+            while True:
+                n = istream.read(buf)
+                if n == -1:
+                    break
+                if n > 0:
+                    f.write(bytes(buf[:n]))
+    finally:
+        try:
+            istream.close()
+        except Exception:
+            pass
+    return dest_path
+
+
+def pick_file(on_file, mime='*/*'):
+    """پنجرهٔ انتخاب فایل بومی را باز می‌کند و مسیر یک کپی محلی از فایل را
+    از طریق on_file(path_or_None, message) برمی‌گرداند. برای ZIP و JSON مناسب است."""
+    if platform == 'android':
+        try:
+            _android_pick_file(on_file, mime)
+        except Exception as e:
+            on_file(None, 'باز کردن انتخابگر فایل ممکن نشد: %s' % e)
+    else:
+        _desktop_pick_file(on_file)
+
+
+def _android_pick_file(on_file, mime='*/*'):
+    from jnius import autoclass
+    from android import activity as _act
+    from kivy.clock import Clock
+    import os as _os
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+    Intent = autoclass('android.content.Intent')
+    String = autoclass('java.lang.String')
+    activity = PythonActivity.mActivity
+    REQUEST = 0x4A54
+
+    def _cb(path, msg):
+        Clock.schedule_once(lambda dt: on_file(path, msg), 0)
+
+    def _on_result(request, result, intent):
+        if request != REQUEST:
+            return
+        try:
+            _act.unbind(on_activity_result=_on_result)
+        except Exception:
+            pass
+        if result != -1 or intent is None:   # Activity.RESULT_OK == -1
+            _cb(None, 'انتخاب فایل لغو شد.')
+            return
+        try:
+            uri = intent.getData()
+            try:
+                cache_dir = activity.getCacheDir().getAbsolutePath()
+            except Exception:
+                cache_dir = '/sdcard'
+            dest = _os.path.join(cache_dir, 'import_picked.bin')
+            _copy_uri_to_file(activity, uri, dest)
+            _cb(dest, '')
+        except Exception as e:
+            _cb(None, 'خواندن فایل ممکن نشد: %s' % e)
+
+    _act.bind(on_activity_result=_on_result)
+    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+    intent.setType(String(mime))
+    activity.startActivityForResult(intent, REQUEST)
+
+
 def _android_pick_text(on_text, mime='application/json'):
     from jnius import autoclass
     from android import activity as _act
@@ -296,8 +375,9 @@ def _android_pick_text(on_text, mime='application/json'):
     activity.startActivityForResult(intent, REQUEST)
 
 
-def _desktop_pick_text(on_text):
-    """مرورگر فایل ساده و فارسی‌خوان برای دسکتاپ (همهٔ نام‌ها با rtl شکل‌دهی می‌شوند)."""
+def _desktop_browse(deliver, exts=('.json',), title='انتخاب فایل', want_path=False):
+    """مرورگر فایل ساده و فارسی‌خوان برای دسکتاپ (همهٔ نام‌ها با rtl شکل‌دهی می‌شوند).
+    اگر want_path=True باشد مسیر فایل انتخاب‌شده برگردانده می‌شود، وگرنه متن آن."""
     import os
     try:
         from kivy.uix.popup import Popup
@@ -308,13 +388,14 @@ def _desktop_pick_text(on_text):
         from kivy.uix.label import Label
         from kivy.metrics import dp
     except Exception as e:
-        on_text(None, 'انتخابگر فایل در دسترس نیست: %s' % e)
+        deliver(None, 'انتخابگر فایل در دسترس نیست: %s' % e)
         return
     try:
         from rtl import rtl as _r
     except Exception:
         _r = lambda x: x
 
+    exts = tuple(x.lower() for x in exts)
     state = {'cwd': os.path.expanduser('~')}
     root = BoxLayout(orientation='vertical', spacing=6, padding=6)
     path_lbl = Label(text='', font_name='ui', size_hint_y=None, height=dp(30),
@@ -326,7 +407,7 @@ def _desktop_pick_text(on_text):
     grid.bind(minimum_height=grid.setter('height'))
     sv.add_widget(grid)
     root.add_widget(sv)
-    pop = Popup(title=_r('انتخاب فایل JSON'), content=root, size_hint=(0.96, 0.96))
+    pop = Popup(title=_r(title), content=root, size_hint=(0.96, 0.96))
 
     def _btn(label_text, cb, bg=(0.20, 0.22, 0.28, 1)):
         b = Button(text=_r(label_text), font_name='ui', size_hint_y=None, height=dp(42),
@@ -343,11 +424,14 @@ def _desktop_pick_text(on_text):
 
     def _pick(fp):
         pop.dismiss()
+        if want_path:
+            deliver(fp, '')
+            return
         try:
             with open(fp, encoding='utf-8') as f:
-                on_text(f.read(), '')
+                deliver(f.read(), '')
         except Exception as e:
-            on_text(None, 'خواندن فایل ممکن نشد: %s' % e)
+            deliver(None, 'خواندن فایل ممکن نشد: %s' % e)
 
     def _list(path):
         state['cwd'] = path
@@ -360,19 +444,27 @@ def _desktop_pick_text(on_text):
             grid.add_widget(_btn('خطا در باز کردن پوشه', lambda: None, bg=(0.4, 0.15, 0.15, 1)))
             return
         dirs = [e for e in entries if os.path.isdir(os.path.join(path, e))]
-        jsons = [e for e in entries if e.lower().endswith('.json')]
+        files = [e for e in entries if e.lower().endswith(exts)]
         for d in dirs:
             grid.add_widget(_btn('📁  ' + d, lambda dd=d: _list(os.path.join(path, dd))))
-        for f in jsons:
+        for f in files:
             grid.add_widget(_btn('📄  ' + f, lambda ff=f: _pick(os.path.join(path, ff)), bg=(0.13, 0.30, 0.20, 1)))
-        if not dirs and not jsons:
-            grid.add_widget(_btn('(فایل JSON یا پوشه‌ای نیست)', lambda: None, bg=(0.16, 0.18, 0.24, 1)))
+        if not dirs and not files:
+            grid.add_widget(_btn('(فایل مناسب یا پوشه‌ای نیست)', lambda: None, bg=(0.16, 0.18, 0.24, 1)))
 
     row = BoxLayout(size_hint_y=None, height=dp(46), spacing=6)
     cancel = Button(text=_r('انصراف'), font_name='ui', background_normal='', background_color=(0.5, 0.2, 0.2, 1))
-    cancel.bind(on_release=lambda *a: (pop.dismiss(), on_text(None, 'لغو شد.')))
+    cancel.bind(on_release=lambda *a: (pop.dismiss(), deliver(None, 'لغو شد.')))
     row.add_widget(cancel)
     root.add_widget(row)
 
     _list(state['cwd'])
     pop.open()
+
+
+def _desktop_pick_text(on_text):
+    _desktop_browse(on_text, exts=('.json',), title='انتخاب فایل JSON', want_path=False)
+
+
+def _desktop_pick_file(on_file):
+    _desktop_browse(on_file, exts=('.json', '.zip'), title='انتخاب فایل ZIP یا JSON', want_path=True)
