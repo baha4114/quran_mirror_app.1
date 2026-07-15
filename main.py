@@ -161,6 +161,9 @@ class RLabel(Label):
         kw.setdefault('halign', 'right')
         kw.setdefault('valign', 'middle')
         kw.setdefault('markup', False)
+        self._fit_single = bool(kw.pop('fit_single', False))
+        self._syncing = False
+        self._base_fs = None
         self._raw = '' if text is None else str(text)
         super().__init__(**kw)
         self.bind(size=self._sync, font_size=self._sync)
@@ -182,7 +185,12 @@ class RLabel(Label):
         return lines
 
     def _sync(self, *a):
+        if getattr(self, '_syncing', False):
+            return
         w = self.width
+        if getattr(self, '_fit_single', False):
+            self._fit_single_line(w)
+            return
         self.text_size = (w, None)
         raw = self._raw
         if not raw:
@@ -203,6 +211,30 @@ class RLabel(Label):
                 self.text = P(raw)
         except Exception:
             self.text = P(raw)
+
+    def _fit_single_line(self, w):
+        raw = self._raw or ''
+        disp = rtl(raw) if raw else ''
+        self.text_size = (None, None)
+        if not disp:
+            self.text = ''
+            return
+        if w and w > 8:
+            if self._base_fs is None:
+                self._base_fs = self.font_size
+            avail = max(1.0, w - dp(10))
+            fs = self._base_fs
+            guard = 0
+            while fs > dp(9) and _text_width(disp, self.font_name, fs) > avail and guard < 60:
+                fs -= dp(1)
+                guard += 1
+            if abs(fs - self.font_size) > 0.5:
+                self._syncing = True
+                try:
+                    self.font_size = fs
+                finally:
+                    self._syncing = False
+        self.text = disp
 
     def set_text(self, text):
         self._raw = '' if text is None else str(text)
@@ -271,7 +303,31 @@ class PillButton(Button):
         self.text = P(text)
 
 
-class PersianTextInput(TextInput):
+class _KbFocusMixin:
+    """رفع مشکل کیبورد اندروید: با یک بار لمس، فوکوس و کیبورد پایدار می‌ماند
+    (به‌جای اینکه کیبورد بالا بیاید و بلافاصله بسته شود)."""
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            super().on_touch_down(touch)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        was = (touch.grab_current is self)
+        res = super().on_touch_up(touch)
+        if was or self.collide_point(*touch.pos):
+            def _refocus(dt):
+                if not self.focus:
+                    self.focus = True
+            Clock.schedule_once(_refocus, 0.05)
+        return res
+
+
+class PlainInput(_KbFocusMixin, TextInput):
+    pass
+
+
+class PersianTextInput(_KbFocusMixin, TextInput):
     # فیلد متنی راست‌به‌چپ که هنگام تایپ، فارسی را درست (بدون آینه‌ای) نشان می‌دهد
     def __init__(self, on_change=None, **kw):
         kw.setdefault('font_name', 'ui')
@@ -281,14 +337,6 @@ class PersianTextInput(TextInput):
         self._logical = ''
         self._guard = False
         self.on_change = on_change
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            res = super().on_touch_down(touch)
-            if not self.focus:
-                self.focus = True
-            return True
-        return super().on_touch_down(touch)
 
     def _render(self):
         self._guard = True
@@ -332,17 +380,10 @@ class PersianTextInput(TextInput):
             self._guard = False
 
 
-class SeedInput(TextInput):
+class SeedInput(_KbFocusMixin, TextInput):
     """ورودی عددی بذر که با یک تاچ ساده فوکوس می‌گیرد و کیبورد را بالا می‌آورد
     (رفع مشکل بالا نیامدن کیبورد داخل ScrollView)."""
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            # رفتار استاندارد TextInput (مکان‌نما/فوکوس/کیبورد) اجرا شود
-            res = super().on_touch_down(touch)
-            if not self.focus:
-                self.focus = True
-            return True if res else res
-        return super().on_touch_down(touch)
+    pass
 
 
 def toast(message, title='پیام'):
@@ -777,6 +818,9 @@ class MatrixScreen(BaseScreen):
         self._select_mode = None      # None | 'pair' | 'group'
         self._selected = []           # idx کارت‌های انتخاب‌شده (جفت)
 
+        # هدر پردازش در یک خط و با اندازهٔ پویا نمایش داده شود (بدون بهم‌ریختگی)
+        self.title_label._fit_single = True
+
         top = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
         self.mode_btn = PillButton('حالت: ماتریس هفت‌عملگر', bg=C_PURPLE, font_size='13sp')
         self.mode_btn.bind(on_release=lambda *a: self.toggle_mode())
@@ -863,7 +907,7 @@ class MatrixScreen(BaseScreen):
         app = App.get_running_app()
         self._reset_state()
         self._seed = (s, a)
-        self.title_label.set_text('پردازش — سوره %s ، آیه %s' % (s, a))
+        self.title_label.set_text('پردازش : سوره %s و آیه %s' % (s, a))
         if self.mode == 'rotation':
             self._cards = features.generate_rotation_cards(app.data, s, a)
         else:
@@ -1143,7 +1187,7 @@ class PredictScreen(BaseScreen):
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
         content.add_widget(RLabel('کد HTML گزارش هوش مصنوعی را اینجا بچسبانید:',
                                   font_size='14sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(50)))
-        ti = TextInput(multiline=True, font_size='12sp', size_hint_y=1,
+        ti = PlainInput(multiline=True, font_size='12sp', size_hint_y=1,
                        background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
         content.add_widget(ti)
         pop = Popup(title=P('نمایش گزارش HTML'), content=content, size_hint=(0.96, 0.85),
@@ -1681,7 +1725,7 @@ class LabScreen(BaseScreen):
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
         content.add_widget(RLabel('کد HTML گزارش هوش مصنوعی را اینجا بچسبانید:',
                                   font_size='14sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(50)))
-        ti = TextInput(multiline=True, font_size='12sp', size_hint_y=1,
+        ti = PlainInput(multiline=True, font_size='12sp', size_hint_y=1,
                        background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
         content.add_widget(ti)
         pop = Popup(title=P('نمایش گزارش HTML'), content=content, size_hint=(0.96, 0.85),
@@ -1716,6 +1760,7 @@ class LabScreen(BaseScreen):
 class OperatorScreen(BaseScreen):
     def __init__(self, **kw):
         super().__init__(title='کشف‌های عملگر', **kw)
+        self.title_label._fit_single = True
         self.source = 'lab'
         self.op_key = 'T1'
         self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
@@ -2031,7 +2076,7 @@ class TagsScreen(BaseScreen):
 # ==================================================================
 class MediaScreen(BaseScreen):
     def __init__(self, **kw):
-        super().__init__(title='رسانه و معرفی', **kw)
+        super().__init__(title='رس��نه و معرفی', **kw)
         self.sound = None
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12), padding=dp(6))
@@ -2138,41 +2183,39 @@ class BackupScreen(BaseScreen):
     def open_import(self):
         app = App.get_running_app()
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
-        content.add_widget(RLabel('فایل JSON ویندوز (favorites.json یا featured.json) را بخوانید یا متن آن را بچسبانید:',
-                                  font_size='13sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(48)))
-        bpick = PillButton('انتخاب فایل از دستگاه', bg=C_BLUE, size_hint_y=None, height=dp(50), font_size='14sp')
+        content.add_widget(RLabel('فایل پشتیبان ویندوز (ZIP) یا فایل JSON (favorites.json / featured.json) را انتخاب کنید، یا متن JSON را بچسبانید:',
+                                  font_size='13sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(64)))
+        bpick = PillButton('انتخاب فایل ZIP یا JSON از دستگاه', bg=C_BLUE, size_hint_y=None, height=dp(50), font_size='13sp')
         content.add_widget(bpick)
-        picked = {'text': None}
+        picked = {'text': None, 'path': None}
         status = RLabel('', font_size='13sp', halign='center', color=C_GOLD,
                         size_hint_y=None, height=dp(30))
         content.add_widget(status)
-        ti = TextInput(multiline=True, font_size='12sp', size_hint_y=1,
+        ti = PlainInput(multiline=True, font_size='12sp', size_hint_y=1,
                        hint_text=P('(اختیاری) در صورت تمایل، متن JSON را اینجا بچسبانید'),
                        background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
         content.add_widget(ti)
 
-        def _on_text(text, msg):
-            if text is None:
+        def _on_file(path, msg):
+            if not path:
                 if msg:
                     toast(msg, 'انتخاب فایل')
                 return
-            picked['text'] = text
-            n = 0
+            picked['path'] = path
+            picked['text'] = None
+            name = ''
             try:
-                import json as _json
-                _d = _json.loads(text)
-                if isinstance(_d, list):
-                    n = len(_d)
-                elif isinstance(_d, dict):
-                    n = sum(len(v) for v in _d.values() if isinstance(v, list))
+                import os as _os
+                name = _os.path.basename(path)
             except Exception:
                 pass
-            status.set_text('فایل خوانده شد (%d مورد). روی «بارگذاری» بزنید.' % n)
-            toast('فایل خوانده شد؛ روی «بارگذاری» بزنید.', 'بارگذاری')
+            status.set_text('فایل انتخاب شد%s. روی «بارگذاری» بزنید.' % ((' (%s)' % name) if name else ''))
+            toast('فایل انتخاب شد؛ حالا روی «بارگذاری» بزنید.', 'بارگذاری')
 
         def _pick(*a):
             import share_util
-            share_util.pick_text_file(_on_text)
+            # هم فایل ZIP خروجی ویندوز و هم فایل JSON پذیرفته می‌شود
+            share_util.pick_file(_on_file, mime='*/*')
         bpick.bind(on_release=_pick)
 
         opts = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
@@ -2197,12 +2240,18 @@ class BackupScreen(BaseScreen):
         bload = PillButton('بارگذاری', bg=C_GREEN)
 
         def _load(*a):
-            txt = picked['text'] or (ti.text or '')
-            if not txt.strip():
-                toast('ابتدا فایل را بخوانید یا متن JSON را بچسبانید.', 'خطا')
-                return
             target = 'lab' if sp.text == P('کشفیات لابراتوار') else 'featured'
-            added, total, err = app.import_items_json(txt, target, state['mode'])
+            try:
+                if picked['path']:
+                    added, total, err = app.import_from_path(picked['path'], target, state['mode'])
+                else:
+                    txt = (ti.text or '')
+                    if not txt.strip():
+                        toast('ابتدا فایلی انتخاب کنید یا متن JSON را بچسبانید.', 'خطا')
+                        return
+                    added, total, err = app.import_items_json(txt, target, state['mode'])
+            except Exception as e:
+                added, total, err = 0, 0, 'خطای غیرمنتظره: %s' % str(e)[:100]
             if err:
                 self.info.set_text('خطا: ' + err)
                 toast('خطا: ' + err, 'خطا')
@@ -2211,6 +2260,11 @@ class BackupScreen(BaseScreen):
             msg = '%d مورد جدید به %s افزوده شد (مجموع: %d).' % (added, where, total)
             self.info.set_text(msg)
             toast(msg, 'بارگذاری')
+            try:
+                sm = self.manager
+                sm.get_screen('lab' if target == 'lab' else 'featured').refresh()
+            except Exception:
+                pass
             pop.dismiss()
         bload.bind(on_release=_load)
         bcancel = PillButton('انصراف', bg=C_RED)
@@ -2343,7 +2397,23 @@ class QuranMirrorApp(App):
         Window.clearcolor = C_BG
         # رفع مشکل بالا نیامدن کیبورد + جلوگیری از پوشاندن ورودی توسط کیبورد
         try:
-            Window.softinput_mode = 'pan'
+            Window.softinput_mode = 'below_target'
+        except Exception:
+            pass
+        # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستن کامل برنامه نادیده گرفته شوند
+        try:
+            from kivy.base import ExceptionManager, ExceptionHandler
+
+            class _AppGuard(ExceptionHandler):
+                def handle_exception(self, exc):
+                    try:
+                        import traceback
+                        traceback.print_exc()
+                    except Exception:
+                        pass
+                    return ExceptionManager.PASS
+
+            ExceptionManager.add_handler(_AppGuard())
         except Exception:
             pass
         # داده
@@ -2713,6 +2783,47 @@ class QuranMirrorApp(App):
             self.featured = dest
             self.save_featured()
         return (added, len(dest), '')
+
+    def import_from_path(self, path, target='lab', mode='merge'):
+        """بارگذاری امن از یک فایل: هم JSON خام و هم فایل ZIP خروجی ویندوز.
+        هرگز کرش نمی‌کند؛ در صورت خطا پیام برمی‌گرداند."""
+        import os as _os
+        import zipfile as _zip
+        try:
+            if not path or not _os.path.exists(path):
+                return (0, 0, 'فایل یافت نشد.')
+            with open(path, 'rb') as _f:
+                head = _f.read(4)
+            if head[:2] == b'PK':
+                member = 'featured.json' if target == 'featured' else 'favorites.json'
+                try:
+                    with _zip.ZipFile(path) as z:
+                        names = z.namelist()
+                        pick = None
+                        for nm in names:
+                            if nm.split('/')[-1].lower() == member:
+                                pick = nm
+                                break
+                        if pick is None:
+                            for nm in names:
+                                if nm.lower().endswith('.json'):
+                                    pick = nm
+                                    break
+                        if pick is None:
+                            return (0, 0, 'داخل فایل ZIP، فایل JSON پیدا نشد.')
+                        raw = z.read(pick).decode('utf-8-sig', 'replace')
+                except Exception as e:
+                    return (0, 0, 'خواندن فایل ZIP ممکن نشد: %s' % str(e)[:80])
+                return self.import_items_json(raw, target, mode)
+            # در غیر این صورت، فایل متنی JSON است
+            try:
+                with open(path, encoding='utf-8-sig', errors='replace') as _f:
+                    raw = _f.read()
+            except Exception as e:
+                return (0, 0, 'خواندن فایل ممکن نشد: %s' % str(e)[:80])
+            return self.import_items_json(raw, target, mode)
+        except Exception as e:
+            return (0, 0, 'خطا در بارگذاری: %s' % str(e)[:80])
 
     # ---------- پشتیبان ----------
     def make_backup(self, dest_dir=None):
