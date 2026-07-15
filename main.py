@@ -1244,7 +1244,7 @@ def op_of(item):
         return 'T5'
     if 'جابجایی' in m and 'کامل' in m:
         return 'T5'
-    if 'تقارن درجا کامل' in m:
+    if '��قارن درجا کامل' in m:
         return 'T2'
     if 'جابجایی' in m and 'فقط سوره' in m:
         return 'T6'
@@ -2076,7 +2076,7 @@ class TagsScreen(BaseScreen):
 # ==================================================================
 class MediaScreen(BaseScreen):
     def __init__(self, **kw):
-        super().__init__(title='رس��نه و معرفی', **kw)
+        super().__init__(title='رس����نه و معرفی', **kw)
         self.sound = None
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12), padding=dp(6))
@@ -2743,12 +2743,68 @@ class QuranMirrorApp(App):
                 return payload.get('featured') or []
         return []
 
-    def import_items_json(self, text, target='lab', mode='merge'):
+    def _parse_json_tolerant(self, text):
+        """پارس بردبار JSON: در برابر «Extra data»، دادهٔ تکراری/اضافه،
+        BOM و JSON خط‌به‌خط مقاوم است. (payload, error) برمی‌گرداند."""
         import json as _json
+        s = (text or '')
+        # حذف BOM و نویسه‌های نامرئی ابتدا/انتها
+        s = s.replace('\ufeff', '').replace('\u200b', '').strip()
+        if not s:
+            return None, 'متن خالی است.'
+        # ۱) حالت عادی
         try:
-            payload = _json.loads(text)
-        except Exception as e:
-            return (0, 0, 'JSON نامعتبر: %s' % str(e)[:80])
+            return _json.loads(s), None
+        except Exception:
+            pass
+        # ۲) پارس مقادیر پشت‌سرهم و نادیده‌گرفتن دادهٔ اضافهٔ انتها
+        dec = _json.JSONDecoder()
+        collected = []
+        idx, n = 0, len(s)
+        while idx < n:
+            while idx < n and s[idx] in ' \t\r\n,;\ufeff':
+                idx += 1
+            if idx >= n:
+                break
+            try:
+                val, end = dec.raw_decode(s, idx)
+            except Exception:
+                break
+            collected.append(val)
+            if end <= idx:
+                break
+            idx = end
+        if collected:
+            if len(collected) == 1:
+                return collected[0], None
+            merged = []
+            only_lists = True
+            for v in collected:
+                if isinstance(v, list):
+                    merged.extend(v)
+                else:
+                    only_lists = False
+            if only_lists:
+                return merged, None
+            return collected[0], None
+        # ۳) JSON خط‌به‌خط
+        out = []
+        for line in s.splitlines():
+            line = line.strip().rstrip(',')
+            if not line or line in ('[', ']', '{', '}'):
+                continue
+            try:
+                out.append(_json.loads(line))
+            except Exception:
+                pass
+        if out:
+            return out, None
+        return None, 'قالب JSON قابل خواندن نبود.'
+
+    def import_items_json(self, text, target='lab', mode='merge'):
+        payload, perr = self._parse_json_tolerant(text)
+        if perr:
+            return (0, 0, 'JSON نامعتبر: %s' % perr)
         items = self._extract_items(payload, target)
         if not isinstance(items, list):
             return (0, 0, 'ساختار فایل قابل‌شناسایی نیست.')
