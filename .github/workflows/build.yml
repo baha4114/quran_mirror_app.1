@@ -1,75 +1,64 @@
-name: ساخت APK قطب‌نمای قرآنی
-​
-# این گردش‌کار هم با هر push و هم دستی اجرا می‌شود
+name: Ø³Ø§Ø®Øª APK Ù‚Ø·Ø¨â€ŒÙ†Ù…Ø§ÛŒ Ù‚Ø±Ø¢Ù†ÛŒ
+
+# Ø§ÛŒÙ† Ú¯Ø±Ø¯Ø´â€ŒÚ©Ø§Ø± Ù‡Ù… Ø¨Ø§ Ù‡Ø± push Ùˆ Ù‡Ù… Ø¯Ø³ØªÛŒ Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´ÙˆØ¯
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
-​
+
 jobs:
   build-android:
     runs-on: ubuntu-22.04
     steps:
-      - name: دریافت کد
+      - name: Ø¯Ø±ÛŒØ§ÙØª Ú©Ø¯
         uses: actions/checkout@v4
-​
-      - name: نصب پایتون
+
+      - name: Ù†ØµØ¨ Ù¾Ø§ÛŒØªÙˆÙ†
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-​
-      - name: فعال‌سازی جاوا 17 (مورد نیاز Gradle)
+
+      - name: ÙØ¹Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Ø¬Ø§ÙˆØ§ 17 (Ù…ÙˆØ±Ø¯ Ù†ÛŒØ§Ø² Gradle)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-​
-      - name: نصب وابستگی‌های سیستم
+
+      - name: Ù†ØµØ¨ ÙˆØ§Ø¨Ø³ØªÚ¯ÛŒâ€ŒÙ‡Ø§ÛŒ Ø³ÛŒØ³ØªÙ…
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config \
             zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev \
             build-essential ccache libltdl-dev
-​
-      - name: نصب buildozer و cython
+
+      - name: Ù†ØµØ¨ buildozer Ùˆ cython
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer==1.5.0 cython==0.29.33
-​
-      - name: آماده‌سازی نسخهٔ پایدار python-for-android (پایتون 3.11)
+
+      - name: Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ù†Ø³Ø®Ù‡Ù” Ù¾Ø§ÛŒØ¯Ø§Ø± python-for-android (Ù¾Ø§ÛŒØªÙˆÙ† 3.11)
         run: |
           pip download --no-deps --no-binary :all: python-for-android==2024.1.21 -d /tmp/p4asrc
           mkdir -p $HOME/p4a
           tar -xzf /tmp/p4asrc/*.tar.gz -C $HOME/p4a --strip-components=1
           pip install -e $HOME/p4a
-​
-      # فقط SDK/NDK/زنجیرهٔ ابزار (~/.buildozer) کش می‌شود — این‌ها به کد اپ ربطی ندارند
-      # پوشهٔ .buildozer پروژه (که کد بسته‌بندی‌شدهٔ اپ را نگه می‌دارد) عمداً کش نمی‌شود
-      # تا هر بیلد از روی آخرین کد تازه ساخته شود (رفع مشکل «کد جدید در APK دیده نمی‌شود»)
-      - name: کش زنجیرهٔ ابزار اندروید (فقط SDK/NDK)
+
+      - name: Ú©Ø´ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø³Ø§Ø®Øª (Ø¨Ø±Ø§ÛŒ Ø³Ø±Ø¹Øª Ø¯ÙØ¹Ø§Øª Ø¨Ø¹Ø¯)
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
-          key: buildozer-toolchain-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-toolchain-
-​
-      - name: پاک‌سازی بستهٔ قبلیِ اپ (تضمین بازساخت از کد تازه)
-        run: |
-          rm -rf .buildozer/android/platform/build-*/dists
-          rm -rf .buildozer/android/app
-          find . -name '__pycache__' -type d -prune -exec rm -rf {} + || true
-​
-      - name: پذیرش مجوزهای اندروید و ساخت APK (دیباگ)
+            .buildozer
+          key: buildozer-cache-v1
+
+      - name: Ù¾Ø°ÛŒØ±Ø´ Ù…Ø¬ÙˆØ²Ù‡Ø§ÛŒ Ø§Ù†Ø¯Ø±ÙˆÛŒØ¯ Ùˆ Ø³Ø§Ø®Øª APK (Ø¯ÛŒØ¨Ø§Ú¯)
         run: |
           set +o pipefail
           yes | buildozer android debug
-​
-      - name: آپلود APK به عنوان خروجی
+
+      - name: Ø¢Ù¾Ù„ÙˆØ¯ APK Ø¨Ù‡ Ø¹Ù†ÙˆØ§Ù† Ø®Ø±ÙˆØ¬ÛŒ
         uses: actions/upload-artifact@v4
         with:
           name: quran-mirror-apk
           path: bin/*.apk
-​
