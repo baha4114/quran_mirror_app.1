@@ -181,23 +181,53 @@ def _android_save_document(path, on_done, mime='application/json', then_share=Fa
     activity.startActivityForResult(intent, REQUEST)
 
 
+def _android_public_html_path(filename='gozaresh.html'):
+    """مسیری در پوشهٔ عمومی Download که مرورگرها اجازهٔ خواندنش را دارند."""
+    from jnius import autoclass
+    Environment = autoclass('android.os.Environment')
+    dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+    return os.path.join(dl.getAbsolutePath(), filename)
+
+
 def _android_open_html(path):
-    """باز کردن یک فایل HTML در مرورگر اندروید (ACTION_VIEW با FileProvider)."""
+    """نمایش فایل HTML با پنجرهٔ «انتخاب مرورگر» (ACTION_VIEW + createChooser).
+    فایل به پوشهٔ عمومی Download کپی می‌شود تا مرورگرها بتوانند آن را بخوانند
+    (بدون نیاز به ثبت FileProvider در منیفست)."""
     from jnius import autoclass, cast
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     Intent = autoclass('android.content.Intent')
+    Uri = autoclass('android.net.Uri')
     File = autoclass('java.io.File')
-    FileProvider = autoclass('androidx.core.content.FileProvider')
     String = autoclass('java.lang.String')
+    StrictMode = autoclass('android.os.StrictMode')
+    VmPolicyBuilder = autoclass('android.os.StrictMode$VmPolicy$Builder')
     activity = PythonActivity.mActivity
-    jfile = File(path)
-    authority = str(activity.getPackageName()) + '.fileprovider'
-    uri = FileProvider.getUriForFile(activity, String(authority), jfile)
-    intent = Intent(Intent.ACTION_VIEW)
-    intent.setDataAndType(uri, String('text/html'))
-    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    activity.startActivity(intent)
+
+    # کپی به پوشهٔ عمومی (مرورگر به حافظهٔ خصوصی اپ دسترسی ندارد)
+    target = path
+    try:
+        pub = _android_public_html_path(os.path.basename(path))
+        if os.path.abspath(pub) != os.path.abspath(path):
+            import shutil
+            shutil.copyfile(path, pub)
+            target = pub
+    except Exception:
+        target = path
+
+    # اجازهٔ عبور file:// در اندروید ۷+ (جلوگیری از FileUriExposedException)
+    try:
+        StrictMode.setVmPolicy(VmPolicyBuilder().build())
+    except Exception:
+        pass
+
+    uri = Uri.fromFile(File(target))
+    view = Intent(Intent.ACTION_VIEW)
+    view.setDataAndType(uri, String('text/html'))
+    view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    title = cast('java.lang.CharSequence', String('نمایش گزارش با مرورگر:'))
+    chooser = Intent.createChooser(view, title)
+    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    activity.startActivity(chooser)
     return True
 
 
@@ -208,7 +238,7 @@ def open_html(path):
     if platform == 'android':
         try:
             _android_open_html(path)
-            return True, 'گزارش در مرورگر باز شد.'
+            return True, 'پنجرهٔ انتخاب مرورگر باز شد.'
         except Exception as e:
             return False, 'باز کردن مرورگر ممکن نشد: %s' % e
     else:
