@@ -504,7 +504,7 @@ class HomeScreen(BaseScreen):
                          size_hint_y=None, height=dp(172), padding=dp(12), spacing=dp(8))
         vsbox.add_widget(RLabel('جستجوی متن آیه یا ترجمه', bold=True, font_size='16sp',
                                 halign='center', color=C_TEXT, size_hint_y=None, height=dp(26)))
-        self.vs_in = PersianTextInput(hint_text=P('بخشی از آیه یا ترجمه را بنویسید (عربی یا فارسی)'),
+        self.vs_in = PersianTextInput(hint_text=P('متن آیه/ترجمه (عربی یا فارسی) یا شمارهٔ آیه — مثلاً ۲'),
                                       font_name='arabic', halign='right', font_size='16sp',
                                       multiline=False, size_hint_y=None, height=dp(48),
                                       background_color=(1, 1, 1, 0.92),
@@ -696,19 +696,30 @@ class HomeScreen(BaseScreen):
         if not q:
             toast('ابتدا واژه یا بخشی از متن را وارد کنید.', 'جستجو')
             return
-        results = app.data.search_all(q, limit=300)
+        results = app.data.search_all(q, limit=600)
         if not results:
             toast('هیچ آیه‌ای برای این عبارت پیدا نشد.', 'یافت نشد')
             return
+
+        # --- بارگذاری صفحه‌ای (۳۰ تایی) برای حذف ریشه‌ای هنگ/کندی اسکرول ---
+        PAGE = 30
+        state = {'shown': 0}
+        is_num = q and core.conv(q).strip().isdigit()
+        head_txt = ('%d آیه با شمارهٔ «%s»' % (len(results), q)) if is_num \
+            else ('%d نتیجه برای «%s» (از بیشترین تطابق)' % (len(results), q))
+
         root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
-        root.add_widget(RLabel('%d نتیجه برای «%s» (از بیشترین تطابق)' % (len(results), q),
-                               bold=True, font_size='15sp', halign='center', color=C_GOLD,
-                               size_hint_y=None, height=dp(30)))
+        header = RLabel(head_txt, bold=True, font_size='15sp', halign='center', color=C_GOLD,
+                        size_hint_y=None, height=dp(30))
+        root.add_widget(header)
         sv = ScrollView(do_scroll_x=False, bar_width=dp(4))
         grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(2))
         grid.bind(minimum_height=grid.setter('height'))
         popup = Popup(title=P('نتایج جستجو'), size_hint=(0.96, 0.92))
-        for r in results:
+
+        more_btn = PillButton('نمایش نتایج بیشتر', bg=C_BLUE, size_hint_y=None, height=dp(46))
+
+        def _make_row(r):
             s, a = r['s'], r['a']
             arb = r.get('arb', '') or ''
             pers = r.get('pers', '') or ''
@@ -723,19 +734,63 @@ class HomeScreen(BaseScreen):
             card.add_widget(RLabel(pers_s, font_size='13sp', halign='right',
                                    color=C_MUTED, size_hint_y=None, height=dp(36)))
             card.bind(on_release=lambda inst, ss=s, aa=a: self._pick_result(ss, aa, popup))
-            grid.add_widget(card)
+            return card
+
+        def _load_more(*a):
+            start = state['shown']
+            for r in results[start:start + PAGE]:
+                grid.add_widget(_make_row(r))
+            state['shown'] = min(len(results), start + PAGE)
+            remaining = len(results) - state['shown']
+            header.set_text('%s — نمایش %d از %d' % (head_txt, state['shown'], len(results)))
+            if remaining <= 0:
+                more_btn.set_text('همهٔ نتایج نمایش داده شد')
+                more_btn.disabled = True
+            else:
+                more_btn.set_text('نمایش نتایج بیشتر (%d باقی‌مانده)' % remaining)
+
+        more_btn.bind(on_release=_load_more)
         sv.add_widget(grid)
         root.add_widget(sv)
+        root.add_widget(more_btn)
         close = PillButton('بستن', bg=(1, 1, 1, 0.12), fg=C_TEXT, size_hint_y=None, height=dp(46))
         close.bind(on_release=lambda *a: popup.dismiss())
         root.add_widget(close)
         popup.content = root
         popup.open()
+        _load_more()   # صفحهٔ نخست (۳۰ مورد اول)
 
 
 # ==================================================================
 # کارت آیه (مشترک)
 # ==================================================================
+# ------------------------------------------------------------------
+# مدیریت چرخهٔ عمر انیمیشن‌های نوری (��فع نشت انیمیشن و آزادسازی ترد اصلی)
+# ------------------------------------------------------------------
+_LIVE_GLOWS = []   # [(anim, target_color, widget)]
+
+
+def _register_glow(anim, target, widget):
+    """هر انیمیشن تکرارشونده را ثبت می‌کند تا بعداً بتوان متوقف‌ش‌ کرد."""
+    _LIVE_GLOWS.append((anim, target, widget))
+    if len(_LIVE_GLOWS) > 80:
+        _prune_glows()
+
+
+def _prune_glows():
+    """انیمیشن ویجت‌هایی که دیگر روی صفحه نیستند را لغو می‌کند (جلوگیری از اشباع ترد UI)."""
+    alive = []
+    for anim, target, widget in _LIVE_GLOWS:
+        try:
+            if widget is not None and widget.get_root_window() is None:
+                anim.cancel(target)
+            else:
+                alive.append((anim, target, widget))
+        except Exception:
+            pass
+    _LIVE_GLOWS[:] = alive
+
+
 def apply_glow(widget, color=None, speed=1.4):
     """نور افکتی نرم که دور یک کارت می‌تپد/می‌چرخد."""
     from kivy.graphics import Color as _Color, Line as _Line
@@ -755,6 +810,7 @@ def apply_glow(widget, color=None, speed=1.4):
     anim = Animation(a=0.85, duration=speed) + Animation(a=0.12, duration=speed)
     anim.repeat = True
     anim.start(gc)
+    _register_glow(anim, gc, widget)
     return gl
 
 
@@ -932,6 +988,7 @@ class MatrixScreen(BaseScreen):
 
     def _render(self):
         self.list.clear_widgets()
+        _prune_glows()   # لغو انیمیشن‌های کارت‌های حذف‌شده تا ترد UI آزاد بماند
         self._update_reg_bar()
         if not self._cards:
             self.list.add_widget(RLabel('داده‌ای برای این بذر یافت نشد.', font_size='15sp',
@@ -1244,7 +1301,7 @@ def op_of(item):
         return 'T5'
     if 'جابجایی' in m and 'کامل' in m:
         return 'T5'
-    if '��قارن درجا کامل' in m:
+    if '��ق��رن درجا کامل' in m:
         return 'T2'
     if 'جابجایی' in m and 'فقط سوره' in m:
         return 'T6'
@@ -1304,6 +1361,7 @@ def _neon_badge(text, color=None, size=None):
     anim = Animation(a=1.0, duration=0.6) + Animation(a=0.12, duration=0.6)
     anim.repeat = True
     anim.start(lc)
+    _register_glow(anim, lc, lbl)
     return lbl
 
 
@@ -1384,6 +1442,9 @@ def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=
     def _tog(*a):
         state['d'] = not state['d']
         btog.set_text('وضعیت: تردیدی' if state['d'] else 'وضعیت: مطمئن')
+        # رنگ پس‌زمینه هم همگام شود تا تغییر وضعیت کاملاً دیده شود
+        btog._bg = list(C_ORANGE if state['d'] else C_GREEN)
+        btog._state()
     btog.bind(on_release=_tog)
     content.add_widget(btog)
     ep = Popup(title=P(title), content=content, size_hint=(0.94, 0.75),
@@ -1772,7 +1833,7 @@ class OperatorScreen(BaseScreen):
     def load(self, source, op_key, title):
         self.source = source
         self.op_key = op_key
-        src_name = 'لابراتوار' if source == 'lab' else 'گلچین'
+        src_name = 'لابراتوار' if source == 'lab' else '��لچین'
         self.title_label.set_text('%s — %s' % (src_name, title))
         self.refresh()
 
@@ -2076,7 +2137,7 @@ class TagsScreen(BaseScreen):
 # ==================================================================
 class MediaScreen(BaseScreen):
     def __init__(self, **kw):
-        super().__init__(title='رس����نه و معرفی', **kw)
+        super().__init__(title='��س����نه و معرفی', **kw)
         self.sound = None
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12), padding=dp(6))
@@ -2344,7 +2405,7 @@ class GuideScreen(BaseScreen):
         ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
-        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه یک‌بار پخش می‌شود.'),
+        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه ��ک‌بار پخش می‌شود.'),
         ('پشتیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
         ('درباره', 'معرفی اپلیکیشن و راه‌های ارتباط با مؤلف (سایت مرجع و شناسهٔ پیام‌رسان بله).'),
     ]
@@ -2667,7 +2728,7 @@ class QuranMirrorApp(App):
         self.last_discovery_key = discovery_key(entry)
         self.last_discovery_section = lab_section_of(entry)
         open_note_editor(entry, 'lab', title='ثبت تحلیل کشف گروهی',
-                         intro='کشف گروهی با %d مقصد ثبت شد. تحلیل و وضعیت تردید را انتخاب کنید:' % len(targets),
+                         intro='کشف گروهی با %d مقصد ثبت شد. تحل��ل و وضعیت تردید را انتخاب کنید:' % len(targets),
                          on_saved=lambda: setattr(self, 'last_discovery_section', lab_section_of(entry)))
 
     def add_pair_discovery(self, seed, ta, tb, note='', relation_type='نامشخص', is_doubtful=False):
