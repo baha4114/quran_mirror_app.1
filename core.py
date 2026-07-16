@@ -183,9 +183,27 @@ class QuranData:
                 return sa
         return None
 
+    def search_by_ayah_number(self, n, limit=None):
+        """همهٔ آیاتی که «شمارهٔ آیه»‌شان برابر n است، در سراسر سوره‌ها.
+        مثال: n=2 ⇒ آیهٔ ۲ همهٔ سوره‌هایی که در دیتاکاوش موجودند.
+        خروجی هم‌شکل search_all است: [{'s','a','arb','pers','score'}] مرتب‌شده بر اساس شمارهٔ سوره."""
+        out = []
+        for (s, a), v in self.db.items():
+            if a == n:
+                out.append({'s': s, 'a': a,
+                            'arb': v.get('arb', ''), 'pers': v.get('pers', ''),
+                            'score': 0})
+        out.sort(key=lambda r: r['s'])
+        return out[:limit] if limit else out
+
     def search_all(self, query, limit=300):
         """فهرست همهٔ آیاتِ حاویِ عبارت (در متن عربی یا ترجمهٔ فارسی)،
-        مرتب‌شده از بیشترین تطابق تا کمترین. خروجی: [{'s','a','arb','pers','score'}]."""
+        مرتب‌شده از بیشترین تطابق تا کمترین. خروجی: [{'s','a','arb','pers','score'}].
+        اگر ورودی فقط عدد باشد، جستجوی عددی روی «شمارهٔ آیه» انجام می‌شود."""
+        # --- جستجوی عددی: ورودیِ صرفاً رقمی (فارسی/عربی/انگلیسی) ---
+        raw_num = conv(str(query if query is not None else '')).strip()
+        if raw_num and raw_num.isdigit():
+            return self.search_by_ayah_number(int(raw_num), limit=limit)
         q = normalize_text(query)
         if len(q) < 2:
             return []
