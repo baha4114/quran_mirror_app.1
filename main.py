@@ -10,8 +10,12 @@ import shutil
 import zipfile
 from datetime import datetime
 
-from kivy.config import Config
-Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
+from kivy.utils import platform as _kivy_platform
+# روی اندروید/iOS تنظیماتِ ماوس اعمال نشود تا لمسِ انگشت به‌صورت استاندارد و روان مدیریت شود
+# (فعال‌بودنِ ارائه‌دهندهٔ ماوس روی موبایل باعث تداخل با اسکرول و لمسِ دکمه‌ها می‌شود)
+if _kivy_platform not in ('android', 'ios'):
+    from kivy.config import Config
+    Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
 from kivy.app import App
 from kivy.core.text import LabelBase
@@ -63,6 +67,10 @@ LabelBase.register(name='Roboto', fn_regular=asset('font.ttf'), fn_bold=asset('f
 C_BG = (0.05, 0.08, 0.14, 1)
 C_PANEL = (1, 1, 1, 0.10)
 C_PANEL_SOLID = (0.10, 0.14, 0.22, 1)
+# نسخه و نشانهٔ بیلد (روی صفحهٔ خانه نشان داده می‌شود) — هر بار کد را عوض کردی این را هم بالا ببر
+BUILD_VERSION = '3.2'
+BUILD_TAG = '2026-07-17'
+
 C_GOLD = (0.95, 0.77, 0.36, 1)
 C_BLUE = (0.15, 0.55, 0.92, 1)
 C_PURPLE = (0.61, 0.28, 0.80, 1)
@@ -362,10 +370,14 @@ def show_html_in_app(raw_html):
         toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
         return
     root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
-    sv = ScrollView(do_scroll_x=False, bar_width=dp(6), scroll_type=['bars', 'content'])
-    lbl = RLabel(text, font_size='14sp', halign='right', color=C_TEXT, size_hint_y=None)
-    lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(16)))
-    sv.add_widget(lbl)
+    sv = ScrollView(do_scroll_x=False, bar_width=dp(8), scroll_type=['bars', 'content'])
+    # کادرِ تیرهٔ صریح با متنِ روشن — پترنِ آزموده‌شدهٔ همین برنامه (BoxLayout با minimum_height)
+    box = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(12), spacing=dp(6))
+    box.bind(minimum_height=box.setter('height'))
+    lbl = RLabel(text, font_size='15sp', halign='right', color=(1, 1, 1, 1), size_hint_y=None)
+    lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(12)))
+    box.add_widget(lbl)
+    sv.add_widget(box)
     root.add_widget(sv)
     pop = Popup(title=P('گزارش'), content=root, size_hint=(0.96, 0.92),
                 title_font='ui', title_align='center', separator_color=C_GOLD)
@@ -454,7 +466,7 @@ class PersianTextInput(_KbFocusMixin, TextInput):
 
 class SeedInput(_KbFocusMixin, TextInput):
     """ورودی عددی بذر که با یک تاچ ساده فوکوس می‌گیرد و کیبورد را بالا می‌آورد
-    (رفع مشکل بالا نیامد�� کیبورد داخل ScrollView)."""
+    (رفع مشکل بالا نیامد������ کیبورد داخل ScrollView)."""
     pass
 
 
@@ -570,6 +582,11 @@ class HomeScreen(BaseScreen):
                           color=C_MUTED, size_hint_y=None, height=dp(28))
         content.add_widget(title)
         content.add_widget(subtitle)
+        # نشانهٔ نسخه/بیلد — برای اطمینان از اینکه دقیقاً همین کد روی گوشی اجرا می‌شود
+        build_tag = RLabel('نسخه %s • بیلد %s' % (BUILD_VERSION, BUILD_TAG),
+                           font_size='12sp', halign='center', color=C_GOLD,
+                           size_hint_y=None, height=dp(20))
+        content.add_widget(build_tag)
 
         # پنل شیشه‌ایِ جستجوی متن آیه یا ترجمه (بدون نیاز به اعراب دقیق)
         vsbox = RoundBox(bg=(0.05, 0.08, 0.14, 0.62), orientation='vertical',
@@ -982,8 +999,9 @@ class MatrixScreen(BaseScreen):
         self.mode_btn.set_text('حالت: پردازش دورانی ارقام بذر' if self.mode == 'rotation'
                                else 'حالت: ماتریس هفت‌عملگر')
         self.show(*self._seed)
-        toast('حالت پردازش: %s' % ('دورانی ارقام بذر' if self.mode == 'rotation'
-                                    else 'ماتریس هفت‌عملگر'), 'حالت')
+        _n = len(self._cards) if getattr(self, '_cards', None) else 0
+        toast('حالت پردازش: %s\n(%d کارت ساخته شد)' % (('دورانی ارقام بذر' if self.mode == 'rotation'
+                                    else 'ماتریس هفت‌عملگر'), _n), 'حالت')
 
     def toggle_select(self, kind):
         self._select_mode = None if self._select_mode == kind else kind
@@ -992,8 +1010,9 @@ class MatrixScreen(BaseScreen):
         self.pair_btn.set_text('★ انتخاب جفتی' if self._select_mode == 'pair' else 'انتخاب جفتی')
         self._render()
         _names = {'group': 'انتخاب گروهی', 'pair': 'انتخاب جفتی'}
+        _nt = len(self._visible_target_indices())
         if self._select_mode:
-            toast('حالت «%s» فعال شد؛ روی کارت‌های مقصد بزنید.' % _names[kind], 'انتخاب')
+            toast('حالت «%s» فعال شد؛ روی %d کارتِ مقصد بزنید.' % (_names[kind], _nt), 'انتخاب')
         else:
             toast('حالت انتخاب خاموش شد.', 'انتخاب')
 
@@ -1469,15 +1488,16 @@ def generate_default_analysis(e):
 
 
 def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=None, on_saved=None):
-    """پنجرهٔ ثبت/ویرایش تحلیل یک کشف (با برچسب و وضعیت تردید)."""
+    """پنجرهٔ ثبت/ویرایش تحلیل یک کشف (با ب��چسب و وضعیت تردید)."""
     app = App.get_running_app()
     content = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(10))
     if intro:
         content.add_widget(RLabel(intro, font_size='14sp', color=C_GOLD, halign='center',
                                   size_hint_y=None, height=dp(50)))
     content.add_widget(RLabel('تحلیل شما:', font_size='15sp', size_hint_y=None, height=dp(26)))
+    # فیلد متن انعطاف‌پذیر — با بازشدنِ کیبورد خودرا جمع می‌کند تا دکمه‌ها (وضعیت/ذخیره) از کادر بیرون نزنند
     ti = PersianTextInput(multiline=True, font_size='15sp',
-                          size_hint_y=None, height=dp(150), background_color=(1, 1, 1, 0.95),
+                          size_hint_y=1, background_color=(1, 1, 1, 0.95),
                           foreground_color=(0.05, 0.08, 0.14, 1))
     ti.set_logical(item.get('note', ''))
     content.add_widget(ti)
@@ -2414,7 +2434,7 @@ class AboutScreen(BaseScreen):
         box.bind(minimum_height=box.setter('height'))
         box.add_widget(self._lbl('قطب‌نمای قرآنی', bold=True, font_size='24sp', color=C_GOLD, halign='center'))
         box.add_widget(self._lbl('پردازش آینه‌ای (هولوگرافیک) — نسخهٔ موبایل', font_size='15sp', color=C_TEXT, halign='center'))
-        box.add_widget(self._lbl('کاوش الگوهای عددی و م��نایی میان آیات قرآن کریم. تمام ۶۲۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
+        box.add_widget(self._lbl('کاوش الگوهای عددی و م��نایی میان آیات قرآن کریم. تمام ۶��۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
         box.add_widget(self._lbl('راه ارتباطی با مؤلف:', bold=True, font_size='17sp', color=C_GOLD, halign='right'))
         b_site = PillButton('سایت مرجع قرآن ابر ماتریس', bg=C_BLUE, size_hint_y=None, height=dp(56), font_size='15sp')
@@ -2469,8 +2489,8 @@ class GuideScreen(BaseScreen):
         ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
-        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه ��ک‌بار پخش می‌شود.'),
-        ('پشتیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
+        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام با�� شدن برنامه ��ک‌بار پخش می‌شود.'),
+        ('پ��تیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
         ('درباره', 'معرفی اپلیکیشن و راه‌های ارتباط با مؤلف (سایت مرجع و شناسهٔ پیام‌رسان بله).'),
     ]
 
@@ -2525,7 +2545,7 @@ class QuranMirrorApp(App):
             Window.softinput_mode = 'below_target'
         except Exception:
             pass
-        # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستن کامل برنامه نادیده گرفته شوند
+        # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بست�� کامل برنامه نادیده گرفته شوند
         try:
             from kivy.base import ExceptionManager, ExceptionHandler
 
@@ -2538,7 +2558,7 @@ class QuranMirrorApp(App):
                         traceback.print_exc()
                     except Exception:
                         pass
-                    # نمایش خطا روی صفحه (به‌جای نادیده‌گرفتن کامل) تا علت «کارنکردن دکمه‌ها» دیده شود
+                    # نمای�� خطا روی صفحه (به‌جای نادیده‌گرفتن کامل) تا علت «کارنکردن دکمه‌ها» دیده شود
                     try:
                         now = Clock.get_boottime()
                         if now - _guard_state['last'] > 2.0:   # جلوگیری از اسپم پاپ‌آپ
