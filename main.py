@@ -22,9 +22,6 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.recycleview import RecycleView
-from kivy.uix.recycleview.views import RecycleDataViewBehavior
-from kivy.uix.recycleboxlayout import RecycleBoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
@@ -275,43 +272,6 @@ class ClickCard(ButtonBehavior, RoundBox):
     pass
 
 
-class ResultRow(RecycleDataViewBehavior, ButtonBehavior, RoundBox):
-    """ردیفِ قابل‌بازیافت برای RecycleView فهرست نتایج جستجو.
-    تنها ردیف‌هایِ داخلِ دید ساخته/بازسازی می‌شوند → اسکرول کاملاً روان حتی با هزاران نتیجه."""
-    def __init__(self, **kw):
-        super().__init__(bg=(0.11, 0.14, 0.22, 0.98), border=C_GOLD, orientation='vertical',
-                         padding=dp(8), spacing=dp(2), size_hint_y=None, height=dp(124), **kw)
-        self._loc = RLabel('', font_size='12sp', halign='right', color=C_ORANGE,
-                           size_hint_y=None, height=dp(20))
-        self._arb = RLabel('', arabic=True, font_size='15sp', halign='right',
-                           color=C_TEXT, size_hint_y=None, height=dp(46))
-        self._per = RLabel('', font_size='13sp', halign='right', color=C_MUTED,
-                           size_hint_y=None, height=dp(36))
-        self.add_widget(self._loc)
-        self.add_widget(self._arb)
-        self.add_widget(self._per)
-        self._s = None
-        self._a = None
-        self._rv = None
-
-    def refresh_view_attrs(self, rv, index, data):
-        self._rv = rv
-        self._s = data.get('s')
-        self._a = data.get('a')
-        arb = data.get('arb', '') or ''
-        per = data.get('pers', '') or ''
-        self._loc.set_text('سوره %s ، آیه %s' % (self._s, self._a))
-        self._arb.set_text((arb[:75] + '…') if len(arb) > 75 else arb)
-        self._per.set_text((per[:80] + '…') if len(per) > 80 else per)
-        return super().refresh_view_attrs(rv, index, data)
-
-    def on_release(self):
-        rv = getattr(self, '_rv', None)
-        cb = getattr(rv, 'on_pick', None) if rv is not None else None
-        if cb and self._s is not None:
-            cb(self._s, self._a)
-
-
 class PillButton(Button):
     """دکمهٔ گوشه‌گرد رنگی با انیمیشن فشردن."""
     def __init__(self, text='', bg=C_BLUE, fg=(1, 1, 1, 1), radius=14, font_size='16sp', **kw):
@@ -341,6 +301,78 @@ class PillButton(Button):
 
     def set_text(self, text):
         self.text = P(text)
+
+
+def _html_to_lines(raw_html):
+    """تبدیل HTML به متن خوانا برای نمایش داخل خودِ برنامه (بدون نیاز به مرورگر)."""
+    from html.parser import HTMLParser
+    import html as _htmlmod
+
+    class _Extract(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.parts = []
+            self._skip = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ('script', 'style'):
+                self._skip += 1
+            elif tag == 'li':
+                self.parts.append('\n• ')
+            elif tag == 'br':
+                self.parts.append('\n')
+            elif tag in ('p', 'div', 'tr', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'table'):
+                self.parts.append('\n')
+            elif tag in ('td', 'th'):
+                self.parts.append('   ')
+
+        def handle_endtag(self, tag):
+            if tag in ('script', 'style'):
+                self._skip = max(0, self._skip - 1)
+            elif tag in ('p', 'div', 'tr', 'h1', 'h2', 'h3', 'h4', 'li'):
+                self.parts.append('\n')
+
+        def handle_data(self, data):
+            if not self._skip:
+                self.parts.append(data)
+
+    parser = _Extract()
+    try:
+        parser.feed(raw_html)
+    except Exception:
+        pass
+    text = _htmlmod.unescape(''.join(parser.parts))
+    out = []
+    blank = False
+    for ln in text.split('\n'):
+        ln = ln.strip()
+        if ln:
+            out.append(ln)
+            blank = False
+        elif out and not blank:
+            out.append('')
+            blank = True
+    return '\n'.join(out).strip()
+
+
+def show_html_in_app(raw_html):
+    """گزارش HTML را داخل خودِ برنامه (پنجرهٔ اسکرول‌شونده) نمایش می‌دهد."""
+    text = _html_to_lines(raw_html)
+    if not text.strip():
+        toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
+        return
+    root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
+    sv = ScrollView(do_scroll_x=False, bar_width=dp(6), scroll_type=['bars', 'content'])
+    lbl = RLabel(text, font_size='14sp', halign='right', color=C_TEXT, size_hint_y=None)
+    lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(16)))
+    sv.add_widget(lbl)
+    root.add_widget(sv)
+    pop = Popup(title=P('گزارش'), content=root, size_hint=(0.96, 0.92),
+                title_font='ui', title_align='center', separator_color=C_GOLD)
+    close = PillButton('بستن', bg=C_RED, size_hint_y=None, height=dp(46))
+    close.bind(on_release=lambda *a: pop.dismiss())
+    root.add_widget(close)
+    pop.open()
 
 
 class _KbFocusMixin:
@@ -422,7 +454,7 @@ class PersianTextInput(_KbFocusMixin, TextInput):
 
 class SeedInput(_KbFocusMixin, TextInput):
     """ورودی عددی بذر که با یک تاچ ساده فوکوس می‌گیرد و کیبورد را بالا می‌آورد
-    (رفع مشکل بالا نیامدن کیبورد داخل ScrollView)."""
+    (رفع مشکل بالا نیامد�� کیبورد داخل ScrollView)."""
     pass
 
 
@@ -741,32 +773,67 @@ class HomeScreen(BaseScreen):
             toast('هیچ آیه‌ای برای این عبارت پیدا نشد.', 'یافت نشد')
             return
 
-        # --- RecycleView: تنها ردیف‌های داخل دید ساخته می‌شوند → اسکرول کاملاً روان ---
+        # --- اسکرول بی‌پایان: دستهٔ نخست فوری نمایش، بقیه هنگام اسکرول بارگذاری ---
         is_num = q and core.conv(q).strip().isdigit()
         head_txt = ('%d آیه با شمارهٔ «%s»' % (len(results), q)) if is_num \
             else ('%d نتیجه برای «%s» (از بیشترین تطابق)' % (len(results), q))
 
         popup = Popup(title=P('نتایج جستجو'), size_hint=(0.96, 0.92))
         root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
-        root.add_widget(RLabel(head_txt, bold=True, font_size='15sp', halign='center', color=C_GOLD,
-                               size_hint_y=None, height=dp(30)))
+        header = RLabel(head_txt, bold=True, font_size='15sp', halign='center', color=C_GOLD,
+                        size_hint_y=None, height=dp(30))
+        root.add_widget(header)
 
-        rv = RecycleView(scroll_type=['bars', 'content'], bar_width=dp(6))
-        rv.viewclass = ResultRow
-        rv.on_pick = lambda s, a: self._pick_result(s, a, popup)
-        rlm = RecycleBoxLayout(default_size=(None, dp(124)), default_size_hint=(1, None),
-                               size_hint_y=None, orientation='vertical', spacing=dp(6), padding=dp(2))
-        rlm.bind(minimum_height=rlm.setter('height'))
-        rv.add_widget(rlm)
-        rv.data = [{'s': r['s'], 'a': r['a'], 'arb': r.get('arb', '') or '',
-                    'pers': r.get('pers', '') or ''} for r in results]
-        root.add_widget(rv)
+        sv = ScrollView(do_scroll_x=False, bar_width=dp(6), scroll_type=['bars', 'content'])
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(2))
+        grid.bind(minimum_height=grid.setter('height'))
+        sv.add_widget(grid)
+        root.add_widget(sv)
+
+        BATCH = 40
+        state = {'shown': 0, 'loading': False}
+
+        def _make_row(r):
+            s, a = r['s'], r['a']
+            arb = r.get('arb', '') or ''
+            pers = r.get('pers', '') or ''
+            arb_s = (arb[:75] + '…') if len(arb) > 75 else arb
+            pers_s = (pers[:80] + '…') if len(pers) > 80 else pers
+            card = ClickCard(bg=(0.11, 0.14, 0.22, 0.98), border=C_GOLD, orientation='vertical',
+                             size_hint_y=None, height=dp(124), padding=dp(8), spacing=dp(2))
+            card.add_widget(RLabel('سوره %s ، آیه %s' % (s, a), font_size='12sp',
+                                   halign='right', color=C_ORANGE, size_hint_y=None, height=dp(20)))
+            card.add_widget(RLabel(arb_s, arabic=True, font_size='15sp', halign='right',
+                                   color=C_TEXT, size_hint_y=None, height=dp(46)))
+            card.add_widget(RLabel(pers_s, font_size='13sp', halign='right',
+                                   color=C_MUTED, size_hint_y=None, height=dp(36)))
+            card.bind(on_release=lambda inst, ss=s, aa=a: self._pick_result(ss, aa, popup))
+            return card
+
+        def _load_batch(*a):
+            start = state['shown']
+            for r in results[start:start + BATCH]:
+                grid.add_widget(_make_row(r))
+            state['shown'] = min(len(results), start + BATCH)
+            header.set_text('%s — %d از %d' % (head_txt, state['shown'], len(results)))
+            state['loading'] = False
+
+        def _on_scroll(inst, val):
+            # scroll_y=0 یعنی انتهای فهرست؛ نزدیک انتها که رسیدیم دستهٔ بعدی را بیاور
+            if state['loading'] or state['shown'] >= len(results):
+                return
+            if val <= 0.15:
+                state['loading'] = True
+                Clock.schedule_once(_load_batch, 0)
+
+        sv.bind(scroll_y=_on_scroll)
 
         close = PillButton('بستن', bg=(1, 1, 1, 0.12), fg=C_TEXT, size_hint_y=None, height=dp(46))
         close.bind(on_release=lambda *a: popup.dismiss())
         root.add_widget(close)
         popup.content = root
         popup.open()
+        _load_batch()   # دستهٔ نخست بلافاصله نمایش داده می‌شود
 
 
 # ==================================================================
@@ -915,6 +982,8 @@ class MatrixScreen(BaseScreen):
         self.mode_btn.set_text('حالت: پردازش دورانی ارقام بذر' if self.mode == 'rotation'
                                else 'حالت: ماتریس هفت‌عملگر')
         self.show(*self._seed)
+        toast('حالت پردازش: %s' % ('دورانی ارقام بذر' if self.mode == 'rotation'
+                                    else 'ماتریس هفت‌عملگر'), 'حالت')
 
     def toggle_select(self, kind):
         self._select_mode = None if self._select_mode == kind else kind
@@ -922,6 +991,11 @@ class MatrixScreen(BaseScreen):
         self.group_btn.set_text('★ انتخاب گروهی' if self._select_mode == 'group' else 'انتخاب گروهی')
         self.pair_btn.set_text('★ انتخاب جفتی' if self._select_mode == 'pair' else 'انتخاب جفتی')
         self._render()
+        _names = {'group': 'انتخاب گروهی', 'pair': 'انتخاب جفتی'}
+        if self._select_mode:
+            toast('حالت «%s» فعال شد؛ روی کارت‌های مقصد بزنید.' % _names[kind], 'انتخاب')
+        else:
+            toast('حالت انتخاب خاموش شد.', 'انتخاب')
 
     def _reset_state(self):
         self._view_a = {}
@@ -1052,7 +1126,7 @@ class MatrixScreen(BaseScreen):
             warn.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(4)))
             card.add_widget(warn)
 
-        # ردیف آیهٔ قبل/بعد (برای همهٔ کارت‌ها)
+        # ��دیف آیهٔ قبل/بعد (برای همهٔ کارت‌ها)
         nav = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         b_next = PillButton('آیهٔ بعد ▶', bg=(1, 1, 1, 0.14), font_size='13sp')
         b_prev = PillButton('◀ آیهٔ قبل', bg=(1, 1, 1, 0.14), font_size='13sp')
@@ -1165,7 +1239,7 @@ class MatrixScreen(BaseScreen):
 
 
 # ==================================================================
-# صفحهٔ پیش‌بینی (معنا / اعداد)
+# صفحهٔ ��یش‌بینی (معنا / اعداد)
 # ==================================================================
 class PredictScreen(BaseScreen):
     def __init__(self, **kw):
@@ -1258,23 +1332,14 @@ class PredictScreen(BaseScreen):
         pop = Popup(title=P('نمایش گزارش HTML'), content=content, size_hint=(0.96, 0.85),
                     title_font='ui', title_align='center', separator_color=C_GOLD)
         row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
-        bshow = PillButton('نمایش در مرورگر', bg=C_GREEN)
+        bshow = PillButton('نمایش گزارش', bg=C_GREEN)
 
         def _show(*a):
             html = ti.text or ''
             if not html.strip():
                 toast('متن HTML خالی است.', 'خطا')
                 return
-            import share_util
-            path = app._p('gozaresh.html')
-            try:
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(html)
-            except Exception as e:
-                toast('ذخیره نشد: %s' % e, 'خطا')
-                return
-            ok, msg = share_util.open_html(path)
-            toast(msg, 'گزارش' if ok else 'خطا')
+            show_html_in_app(html)   # نمایش داخل خودِ برنامه (بدون نیاز به مرورگر)
         bshow.bind(on_release=_show)
         bclose = PillButton('بستن', bg=C_RED)
         bclose.bind(on_release=pop.dismiss)
@@ -1800,23 +1865,14 @@ class LabScreen(BaseScreen):
         pop = Popup(title=P('نمایش گزارش HTML'), content=content, size_hint=(0.96, 0.85),
                     title_font='ui', title_align='center', separator_color=C_GOLD)
         row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
-        bshow = PillButton('نمایش در مرورگر', bg=C_GREEN)
+        bshow = PillButton('نمایش گزارش', bg=C_GREEN)
 
         def _show(*a):
             html = ti.text or ''
             if not html.strip():
                 toast('متن HTML خالی است.', 'خطا')
                 return
-            import share_util
-            path = app._p('gozaresh.html')
-            try:
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(html)
-            except Exception as e:
-                toast('ذخیره نشد: %s' % e, 'خطا')
-                return
-            ok, msg = share_util.open_html(path)
-            toast(msg, 'گزارش' if ok else 'خطا')
+            show_html_in_app(html)   # نمایش داخل خودِ برنامه (بدون نیاز به مرورگر)
         bshow.bind(on_release=_show)
         bclose = PillButton('بستن', bg=C_RED)
         bclose.bind(on_release=pop.dismiss)
@@ -2081,7 +2137,7 @@ class SearchScreen(BaseScreen):
 # مدیریت برچسب‌ها
 # ==================================================================
 class TagsScreen(BaseScreen):
-    DEFAULT = ["تقابل کامل", "گفت و گو", "زاویه دید متفاوت", "مکمل و بسط‌دهنده", "علت و معلول"]
+    DEFAULT = ["تقابل کامل", "گفت و گو", "زاویه دید متفاوت", "مکمل و بسط��دهنده", "علت و معلول"]
 
     def __init__(self, **kw):
         super().__init__(title='مدیریت برچسب‌ها', **kw)
@@ -2283,7 +2339,7 @@ class BackupScreen(BaseScreen):
 
         def _pick(*a):
             import share_util
-            # هم فایل ZIP خروجی ویندوز و هم فایل JSON پذیرفته می‌شود
+            # هم فایل ZIP خروجی ویندوز و هم فایل JSON پذیرفت�� می‌شود
             share_util.pick_file(_on_file, mime='*/*')
         bpick.bind(on_release=_pick)
 
@@ -2358,7 +2414,7 @@ class AboutScreen(BaseScreen):
         box.bind(minimum_height=box.setter('height'))
         box.add_widget(self._lbl('قطب‌نمای قرآنی', bold=True, font_size='24sp', color=C_GOLD, halign='center'))
         box.add_widget(self._lbl('پردازش آینه‌ای (هولوگرافیک) — نسخهٔ موبایل', font_size='15sp', color=C_TEXT, halign='center'))
-        box.add_widget(self._lbl('کاوش الگوهای عددی و معنایی میان آیات قرآن کریم. تمام ۶۲۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
+        box.add_widget(self._lbl('کاوش الگوهای عددی و م��نایی میان آیات قرآن کریم. تمام ۶۲۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
         box.add_widget(self._lbl('راه ارتباطی با مؤلف:', bold=True, font_size='17sp', color=C_GOLD, halign='right'))
         b_site = PillButton('سایت مرجع قرآن ابر ماتریس', bg=C_BLUE, size_hint_y=None, height=dp(56), font_size='15sp')
@@ -2409,7 +2465,7 @@ class GuideScreen(BaseScreen):
         ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
         ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
         ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
-        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته ب��ز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
+        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته ب��ز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش ��حلیل، حذف و کپی را ببینید.'),
         ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
