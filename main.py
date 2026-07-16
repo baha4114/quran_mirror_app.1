@@ -22,6 +22,9 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.recycleview.views import RecycleDataViewBehavior
+from kivy.uix.recycleboxlayout import RecycleBoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
@@ -272,6 +275,43 @@ class ClickCard(ButtonBehavior, RoundBox):
     pass
 
 
+class ResultRow(RecycleDataViewBehavior, ButtonBehavior, RoundBox):
+    """ردیفِ قابل‌بازیافت برای RecycleView فهرست نتایج جستجو.
+    تنها ردیف‌هایِ داخلِ دید ساخته/بازسازی می‌شوند → اسکرول کاملاً روان حتی با هزاران نتیجه."""
+    def __init__(self, **kw):
+        super().__init__(bg=(0.11, 0.14, 0.22, 0.98), border=C_GOLD, orientation='vertical',
+                         padding=dp(8), spacing=dp(2), size_hint_y=None, height=dp(124), **kw)
+        self._loc = RLabel('', font_size='12sp', halign='right', color=C_ORANGE,
+                           size_hint_y=None, height=dp(20))
+        self._arb = RLabel('', arabic=True, font_size='15sp', halign='right',
+                           color=C_TEXT, size_hint_y=None, height=dp(46))
+        self._per = RLabel('', font_size='13sp', halign='right', color=C_MUTED,
+                           size_hint_y=None, height=dp(36))
+        self.add_widget(self._loc)
+        self.add_widget(self._arb)
+        self.add_widget(self._per)
+        self._s = None
+        self._a = None
+        self._rv = None
+
+    def refresh_view_attrs(self, rv, index, data):
+        self._rv = rv
+        self._s = data.get('s')
+        self._a = data.get('a')
+        arb = data.get('arb', '') or ''
+        per = data.get('pers', '') or ''
+        self._loc.set_text('سوره %s ، آیه %s' % (self._s, self._a))
+        self._arb.set_text((arb[:75] + '…') if len(arb) > 75 else arb)
+        self._per.set_text((per[:80] + '…') if len(per) > 80 else per)
+        return super().refresh_view_attrs(rv, index, data)
+
+    def on_release(self):
+        rv = getattr(self, '_rv', None)
+        cb = getattr(rv, 'on_pick', None) if rv is not None else None
+        if cb and self._s is not None:
+            cb(self._s, self._a)
+
+
 class PillButton(Button):
     """دکمهٔ گوشه‌گرد رنگی با انیمیشن فشردن."""
     def __init__(self, text='', bg=C_BLUE, fg=(1, 1, 1, 1), radius=14, font_size='16sp', **kw):
@@ -504,7 +544,7 @@ class HomeScreen(BaseScreen):
                          size_hint_y=None, height=dp(172), padding=dp(12), spacing=dp(8))
         vsbox.add_widget(RLabel('جستجوی متن آیه یا ترجمه', bold=True, font_size='16sp',
                                 halign='center', color=C_TEXT, size_hint_y=None, height=dp(26)))
-        self.vs_in = PersianTextInput(hint_text=P('متن آیه/ترجمه (عربی یا فارسی) یا شمارهٔ آیه — مثلاً ۲'),
+        self.vs_in = PersianTextInput(hint_text=P('جستجوی متن یا شمارهٔ آیه'),
                                       font_name='arabic', halign='right', font_size='16sp',
                                       multiline=False, size_hint_y=None, height=dp(48),
                                       background_color=(1, 1, 1, 0.92),
@@ -696,69 +736,37 @@ class HomeScreen(BaseScreen):
         if not q:
             toast('ابتدا واژه یا بخشی از متن را وارد کنید.', 'جستجو')
             return
-        results = app.data.search_all(q, limit=600)
+        results = app.data.search_all(q, limit=2000)
         if not results:
             toast('هیچ آیه‌ای برای این عبارت پیدا نشد.', 'یافت نشد')
             return
 
-        # --- بارگذاری صفحه‌ای (۳۰ تایی) برای حذف ریشه‌ای هنگ/کندی اسکرول ---
-        PAGE = 30
-        state = {'shown': 0}
+        # --- RecycleView: تنها ردیف‌های داخل دید ساخته می‌شوند → اسکرول کاملاً روان ---
         is_num = q and core.conv(q).strip().isdigit()
         head_txt = ('%d آیه با شمارهٔ «%s»' % (len(results), q)) if is_num \
             else ('%d نتیجه برای «%s» (از بیشترین تطابق)' % (len(results), q))
 
-        root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
-        header = RLabel(head_txt, bold=True, font_size='15sp', halign='center', color=C_GOLD,
-                        size_hint_y=None, height=dp(30))
-        root.add_widget(header)
-        sv = ScrollView(do_scroll_x=False, bar_width=dp(4))
-        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(2))
-        grid.bind(minimum_height=grid.setter('height'))
         popup = Popup(title=P('نتایج جستجو'), size_hint=(0.96, 0.92))
+        root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
+        root.add_widget(RLabel(head_txt, bold=True, font_size='15sp', halign='center', color=C_GOLD,
+                               size_hint_y=None, height=dp(30)))
 
-        more_btn = PillButton('نمایش نتایج بیشتر', bg=C_BLUE, size_hint_y=None, height=dp(46))
+        rv = RecycleView(scroll_type=['bars', 'content'], bar_width=dp(6))
+        rv.viewclass = ResultRow
+        rv.on_pick = lambda s, a: self._pick_result(s, a, popup)
+        rlm = RecycleBoxLayout(default_size=(None, dp(124)), default_size_hint=(1, None),
+                               size_hint_y=None, orientation='vertical', spacing=dp(6), padding=dp(2))
+        rlm.bind(minimum_height=rlm.setter('height'))
+        rv.add_widget(rlm)
+        rv.data = [{'s': r['s'], 'a': r['a'], 'arb': r.get('arb', '') or '',
+                    'pers': r.get('pers', '') or ''} for r in results]
+        root.add_widget(rv)
 
-        def _make_row(r):
-            s, a = r['s'], r['a']
-            arb = r.get('arb', '') or ''
-            pers = r.get('pers', '') or ''
-            arb_s = (arb[:75] + '…') if len(arb) > 75 else arb
-            pers_s = (pers[:80] + '…') if len(pers) > 80 else pers
-            card = ClickCard(bg=(0.11, 0.14, 0.22, 0.98), border=C_GOLD, orientation='vertical',
-                             size_hint_y=None, height=dp(124), padding=dp(8), spacing=dp(2))
-            card.add_widget(RLabel('سوره %s ، آیه %s' % (s, a), font_size='12sp',
-                                   halign='right', color=C_ORANGE, size_hint_y=None, height=dp(20)))
-            card.add_widget(RLabel(arb_s, arabic=True, font_size='15sp', halign='right',
-                                   color=C_TEXT, size_hint_y=None, height=dp(46)))
-            card.add_widget(RLabel(pers_s, font_size='13sp', halign='right',
-                                   color=C_MUTED, size_hint_y=None, height=dp(36)))
-            card.bind(on_release=lambda inst, ss=s, aa=a: self._pick_result(ss, aa, popup))
-            return card
-
-        def _load_more(*a):
-            start = state['shown']
-            for r in results[start:start + PAGE]:
-                grid.add_widget(_make_row(r))
-            state['shown'] = min(len(results), start + PAGE)
-            remaining = len(results) - state['shown']
-            header.set_text('%s — نمایش %d از %d' % (head_txt, state['shown'], len(results)))
-            if remaining <= 0:
-                more_btn.set_text('همهٔ نتایج نمایش داده شد')
-                more_btn.disabled = True
-            else:
-                more_btn.set_text('نمایش نتایج بیشتر (%d باقی‌مانده)' % remaining)
-
-        more_btn.bind(on_release=_load_more)
-        sv.add_widget(grid)
-        root.add_widget(sv)
-        root.add_widget(more_btn)
         close = PillButton('بستن', bg=(1, 1, 1, 0.12), fg=C_TEXT, size_hint_y=None, height=dp(46))
         close.bind(on_release=lambda *a: popup.dismiss())
         root.add_widget(close)
         popup.content = root
         popup.open()
-        _load_more()   # صفحهٔ نخست (۳۰ مورد اول)
 
 
 # ==================================================================
@@ -2393,7 +2401,7 @@ class AboutScreen(BaseScreen):
 
 
 # ==================================================================
-# راهنما
+# راهنم����
 # ==================================================================
 class GuideScreen(BaseScreen):
     SECTIONS = [
@@ -2401,7 +2409,7 @@ class GuideScreen(BaseScreen):
         ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
         ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
         ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
-        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته باز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
+        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته ب��ز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
         ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
@@ -2465,11 +2473,22 @@ class QuranMirrorApp(App):
         try:
             from kivy.base import ExceptionManager, ExceptionHandler
 
+            _guard_state = {'last': 0.0}
+
             class _AppGuard(ExceptionHandler):
                 def handle_exception(self, exc):
                     try:
                         import traceback
                         traceback.print_exc()
+                    except Exception:
+                        pass
+                    # نمایش خطا روی صفحه (به‌جای نادیده‌گرفتن کامل) تا علت «کارنکردن دکمه‌ها» دیده شود
+                    try:
+                        now = Clock.get_boottime()
+                        if now - _guard_state['last'] > 2.0:   # جلوگیری از اسپم پاپ‌آپ
+                            _guard_state['last'] = now
+                            msg = '%s: %s' % (type(exc).__name__, exc)
+                            Clock.schedule_once(lambda *a: toast(msg[:400], 'خطای داخلی'), 0)
                     except Exception:
                         pass
                     return ExceptionManager.PASS
@@ -2749,7 +2768,7 @@ class QuranMirrorApp(App):
         self.save_favs()
         self.last_discovery_key = discovery_key(entry)
         self.last_discovery_section = lab_section_of(entry)
-        open_note_editor(entry, 'lab', title='ثبت تحلیل جفت عملگری',
+        open_note_editor(entry, 'lab', title='ثبت تحلیل جفت ع��لگری',
                          intro='جفت عملگری زیر بخش %s ثبت شد. تحلیل و وضعیت تردید را انتخاب کنید:' % op_key,
                          on_saved=lambda: setattr(self, 'last_discovery_section', lab_section_of(entry)))
 
