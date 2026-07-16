@@ -369,14 +369,38 @@ def show_html_in_app(raw_html):
     if not text.strip():
         toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
         return
+    # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می‌گذاریم.
+    # دلیل: روی اندروید یک برچسبِ بسیار بلند، یک بافتِ (texture) گرافیکیِ غول‌آسا می‌سازد
+    # که از حداکثرِ مجازِ GPU بزرگ‌تر می‌شود و «صفحهٔ سیاه/خالی» می‌دهد (روی ویندوز مشکلی ندارد).
+    _lines = text.split('\n')
+    _chunks = []
+    _buf, _buf_len = [], 0
+    for _ln in _lines:
+        _buf.append(_ln)
+        _buf_len += len(_ln) + 1
+        if len(_buf) >= 25 or _buf_len >= 1200:
+            _chunks.append('\n'.join(_buf))
+            _buf, _buf_len = [], 0
+    if _buf:
+        _chunks.append('\n'.join(_buf))
+    if not _chunks:
+        _chunks = [text]
+
     root = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
     sv = ScrollView(do_scroll_x=False, bar_width=dp(8), scroll_type=['bars', 'content'])
-    # کادرِ تیرهٔ صریح با متنِ روشن — پترنِ آزموده‌شدهٔ همین برنامه (BoxLayout با minimum_height)
-    box = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(12), spacing=dp(6))
+    box = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(12), spacing=dp(4))
     box.bind(minimum_height=box.setter('height'))
-    lbl = RLabel(text, font_size='15sp', halign='right', color=(1, 1, 1, 1), size_hint_y=None)
-    lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(12)))
-    box.add_widget(lbl)
+    # پس‌زمینهٔ تیرهٔ صریح تا متنِ روشن حتماً دیده شود
+    from kivy.graphics import Color as _Clr, Rectangle as _Rect
+    with box.canvas.before:
+        _Clr(0.06, 0.09, 0.16, 1)
+        _bg = _Rect(pos=box.pos, size=box.size)
+    box.bind(pos=lambda _i, _v: setattr(_bg, 'pos', _v),
+             size=lambda _i, _v: setattr(_bg, 'size', _v))
+    for _ch in _chunks:
+        _lbl = RLabel(_ch, font_size='15sp', halign='right', color=(1, 1, 1, 1), size_hint_y=None)
+        _lbl.bind(texture_size=lambda _i, _v: setattr(_i, 'height', _v[1] + dp(8)))
+        box.add_widget(_lbl)
     sv.add_widget(box)
     root.add_widget(sv)
     pop = Popup(title=P('گزارش'), content=root, size_hint=(0.96, 0.92),
@@ -466,7 +490,7 @@ class PersianTextInput(_KbFocusMixin, TextInput):
 
 class SeedInput(_KbFocusMixin, TextInput):
     """ورودی عددی بذر که با یک تاچ ساده فوکوس می‌گیرد و کیبورد را بالا می‌آورد
-    (رفع مشکل بالا نیامد������ کیبورد داخل ScrollView)."""
+    (رفع مشکل بالا نیامدنِ کیبورد داخل ScrollView)."""
     pass
 
 
@@ -857,7 +881,7 @@ class HomeScreen(BaseScreen):
 # کارت آیه (مشترک)
 # ==================================================================
 # ------------------------------------------------------------------
-# مدیریت چرخهٔ عمر انیمیشن‌های نوری (��فع نشت انیمیشن و آزادسازی ترد اصلی)
+# مدیریت چرخهٔ عمر انیمیشن‌های نوری (رفع نشت انیمیشن و آزادسازی ترد اصلی)
 # ------------------------------------------------------------------
 _LIVE_GLOWS = []   # [(anim, target_color, widget)]
 
@@ -1145,7 +1169,7 @@ class MatrixScreen(BaseScreen):
             warn.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(4)))
             card.add_widget(warn)
 
-        # ��دیف آیهٔ قبل/بعد (برای همهٔ کارت‌ها)
+        # ردیف آیهٔ قبل/بعد (برای همهٔ کارت‌ها)
         nav = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         b_next = PillButton('آیهٔ بعد ▶', bg=(1, 1, 1, 0.14), font_size='13sp')
         b_prev = PillButton('◀ آیهٔ قبل', bg=(1, 1, 1, 0.14), font_size='13sp')
@@ -1258,7 +1282,7 @@ class MatrixScreen(BaseScreen):
 
 
 # ==================================================================
-# صفحهٔ ��یش‌بینی (معنا / اعداد)
+# صفحهٔ پیش‌بینی (معنا / اعداد)
 # ==================================================================
 class PredictScreen(BaseScreen):
     def __init__(self, **kw):
@@ -1393,7 +1417,7 @@ def op_of(item):
         return 'T5'
     if 'جابجایی' in m and 'کامل' in m:
         return 'T5'
-    if '��ق��رن درجا کامل' in m:
+    if 'تقارن درجا کامل' in m:
         return 'T2'
     if 'جابجایی' in m and 'فقط سوره' in m:
         return 'T6'
@@ -1488,7 +1512,7 @@ def generate_default_analysis(e):
 
 
 def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=None, on_saved=None):
-    """پنجرهٔ ثبت/ویرایش تحلیل یک کشف (با ب��چسب و وضعیت تردید)."""
+    """پنجرهٔ ثبت/ویرایش تحلیل یک کشف (با برچسب و وضعیت تردید)."""
     app = App.get_running_app()
     content = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(10))
     if intro:
@@ -1725,7 +1749,7 @@ def show_discovery(item, source='lab', screen=None):
         content = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(10))
         content.add_widget(RLabel('تحلیل شما:', font_size='15sp', size_hint_y=None, height=dp(26)))
         ti = PersianTextInput(multiline=True, font_size='15sp',
-                              size_hint_y=None, height=dp(120), background_color=(1, 1, 1, 0.95),
+                              size_hint_y=1, background_color=(1, 1, 1, 0.95),
                               foreground_color=(0.05, 0.08, 0.14, 1))
         ti.set_logical(item.get('note', ''))
         content.add_widget(ti)
@@ -1735,7 +1759,19 @@ def show_discovery(item, source='lab', screen=None):
                      font_name='ui', size_hint_y=None, height=dp(44))
         content.add_widget(sp)
         tag_map = {P(t): t for t in tags}
-        ep = Popup(title=P('ویرایش تحلیل'), content=content, size_hint=(0.92, 0.6),
+        # امکان تغییر وضعیت (تردیدی ↔ مطمئن) برای همین کشف — مخصوصاً برای خارج‌کردنِ کشف از بخشِ تردیدی‌ها
+        _st = {'d': bool(item.get('is_doubtful', False))}
+        b_status = PillButton('وضعیت: تردیدی' if _st['d'] else 'وضعیت: مطمئن',
+                              bg=C_ORANGE if _st['d'] else C_GREEN, size_hint_y=None, height=dp(44), font_size='14sp')
+
+        def _tog_status(*a):
+            _st['d'] = not _st['d']
+            b_status.set_text('وضعیت: تردیدی' if _st['d'] else 'وضعیت: مطمئن')
+            b_status._bg = list(C_ORANGE if _st['d'] else C_GREEN)
+            b_status._state()
+        b_status.bind(on_release=_tog_status)
+        content.add_widget(b_status)
+        ep = Popup(title=P('ویرایش تحلیل'), content=content, size_hint=(0.92, 0.72),
                    title_font='ui', title_align='center', separator_color=C_GOLD)
         row2 = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
         sv = PillButton('ذخیره', bg=C_GREEN)
@@ -1743,6 +1779,7 @@ def show_discovery(item, source='lab', screen=None):
         def _sv(*a):
             item['note'] = ti.query
             item['relation_type'] = tag_map.get(sp.text, 'نامشخص')
+            item['is_doubtful'] = _st['d']
             if source == 'lab':
                 app.save_favs()
             else:
@@ -1917,7 +1954,7 @@ class OperatorScreen(BaseScreen):
     def load(self, source, op_key, title):
         self.source = source
         self.op_key = op_key
-        src_name = 'لابراتوار' if source == 'lab' else '��لچین'
+        src_name = 'لابراتوار' if source == 'lab' else 'گلچین'
         self.title_label.set_text('%s — %s' % (src_name, title))
         self.refresh()
 
@@ -2157,7 +2194,7 @@ class SearchScreen(BaseScreen):
 # مدیریت برچسب‌ها
 # ==================================================================
 class TagsScreen(BaseScreen):
-    DEFAULT = ["تقابل کامل", "گفت و گو", "زاویه دید متفاوت", "مکمل و بسط��دهنده", "علت و معلول"]
+    DEFAULT = ["تقابل کامل", "گفت و گو", "زاویه دید متفاوت", "مکمل و بسط‌دهنده", "علت و معلول"]
 
     def __init__(self, **kw):
         super().__init__(title='مدیریت برچسب‌ها', **kw)
@@ -2221,7 +2258,7 @@ class TagsScreen(BaseScreen):
 # ==================================================================
 class MediaScreen(BaseScreen):
     def __init__(self, **kw):
-        super().__init__(title='��س����نه و معرفی', **kw)
+        super().__init__(title='رسانه و معرفی', **kw)
         self.sound = None
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12), padding=dp(6))
@@ -2359,7 +2396,7 @@ class BackupScreen(BaseScreen):
 
         def _pick(*a):
             import share_util
-            # هم فایل ZIP خروجی ویندوز و هم فایل JSON پذیرفت�� می‌شود
+            # هم فایل ZIP خروجی ویندوز و هم فایل JSON پذیرفته می‌شود
             share_util.pick_file(_on_file, mime='*/*')
         bpick.bind(on_release=_pick)
 
@@ -2434,7 +2471,7 @@ class AboutScreen(BaseScreen):
         box.bind(minimum_height=box.setter('height'))
         box.add_widget(self._lbl('قطب‌نمای قرآنی', bold=True, font_size='24sp', color=C_GOLD, halign='center'))
         box.add_widget(self._lbl('پردازش آینه‌ای (هولوگرافیک) — نسخهٔ موبایل', font_size='15sp', color=C_TEXT, halign='center'))
-        box.add_widget(self._lbl('کاوش الگوهای عددی و م��نایی میان آیات قرآن کریم. تمام ۶��۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
+        box.add_widget(self._lbl('کاوش الگوهای عددی و معنایی میان آیات قرآن کریم. تمام ۶۲۳۶ آیه به صورت آفلاین در اپ گنجانده شده است.', font_size='13sp', color=C_MUTED, halign='center'))
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
         box.add_widget(self._lbl('راه ارتباطی با مؤلف:', bold=True, font_size='17sp', color=C_GOLD, halign='right'))
         b_site = PillButton('سایت مرجع قرآن ابر ماتریس', bg=C_BLUE, size_hint_y=None, height=dp(56), font_size='15sp')
@@ -2477,7 +2514,7 @@ class AboutScreen(BaseScreen):
 
 
 # ==================================================================
-# راهنم����
+# راهنما
 # ==================================================================
 class GuideScreen(BaseScreen):
     SECTIONS = [
@@ -2485,12 +2522,12 @@ class GuideScreen(BaseScreen):
         ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
         ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
         ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
-        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته ب��ز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش ��حلیل، حذف و کپی را ببینید.'),
+        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته باز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
         ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
-        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام با�� شدن برنامه ��ک‌بار پخش می‌شود.'),
-        ('پ��تیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
+        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه یک‌بار پخش می‌شود.'),
+        ('پشتیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
         ('درباره', 'معرفی اپلیکیشن و راه‌های ارتباط با مؤلف (سایت مرجع و شناسهٔ پیام‌رسان بله).'),
     ]
 
@@ -2545,7 +2582,7 @@ class QuranMirrorApp(App):
             Window.softinput_mode = 'below_target'
         except Exception:
             pass
-        # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بست�� کامل برنامه نادیده گرفته شوند
+        # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستنِ کامل برنامه نادیده گرفته شوند
         try:
             from kivy.base import ExceptionManager, ExceptionHandler
 
@@ -2558,7 +2595,7 @@ class QuranMirrorApp(App):
                         traceback.print_exc()
                     except Exception:
                         pass
-                    # نمای�� خطا روی صفحه (به‌جای نادیده‌گرفتن کامل) تا علت «کارنکردن دکمه‌ها» دیده شود
+                    # نمایشِ خطا روی صفحه (به‌جای نادیده‌گرفتن کامل) تا علت «کارنکردن دکمه‌ها» دیده شود
                     try:
                         now = Clock.get_boottime()
                         if now - _guard_state['last'] > 2.0:   # جلوگیری از اسپم پاپ‌آپ
@@ -2823,7 +2860,7 @@ class QuranMirrorApp(App):
         self.last_discovery_key = discovery_key(entry)
         self.last_discovery_section = lab_section_of(entry)
         open_note_editor(entry, 'lab', title='ثبت تحلیل کشف گروهی',
-                         intro='کشف گروهی با %d مقصد ثبت شد. تحل��ل و وضعیت تردید را انتخاب کنید:' % len(targets),
+                         intro='کشف گروهی با %d مقصد ثبت شد. تحلیل و وضعیت تردید را انتخاب کنید:' % len(targets),
                          on_saved=lambda: setattr(self, 'last_discovery_section', lab_section_of(entry)))
 
     def add_pair_discovery(self, seed, ta, tb, note='', relation_type='نامشخص', is_doubtful=False):
@@ -2844,7 +2881,7 @@ class QuranMirrorApp(App):
         self.save_favs()
         self.last_discovery_key = discovery_key(entry)
         self.last_discovery_section = lab_section_of(entry)
-        open_note_editor(entry, 'lab', title='ثبت تحلیل جفت ع��لگری',
+        open_note_editor(entry, 'lab', title='ثبت تحلیل جفت عملگری',
                          intro='جفت عملگری زیر بخش %s ثبت شد. تحلیل و وضعیت تردید را انتخاب کنید:' % op_key,
                          on_saved=lambda: setattr(self, 'last_discovery_section', lab_section_of(entry)))
 
