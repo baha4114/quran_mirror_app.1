@@ -236,6 +236,15 @@ def open_html(path):
     if not path or not os.path.exists(path):
         return False, 'فایل HTML یافت نشد.'
     if platform == 'android':
+        # ۱) درخواست دسترسی لازم از کاربر (برای نوشتن فایل در پوشهٔ عمومی)
+        try:
+            granted = ensure_all_files_access()
+        except Exception:
+            granted = True
+        if not granted:
+            return False, ('برای نمایش گزارش، در صفحه‌ای که باز شد دسترسی «همهٔ فایل‌ها» را '
+                           'برای این برنامه فعال کنید، سپس دوباره «نمایش در مرورگر» را بزنید.')
+        # ۲) باز کردن با پنجرهٔ انتخاب مرورگر
         try:
             _android_open_html(path)
             return True, 'پنجرهٔ انتخاب مرورگر باز شد.'
