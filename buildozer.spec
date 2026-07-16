@@ -9,7 +9,10 @@ source.include_exts = py,csv,json,ttf,otf,jpg,jpeg,png,mp3,mp4,pdf,txt
 source.include_patterns = assets/*
 source.exclude_dirs = tests, bin, .git, __pycache__, .buildozer
 
-version = 3.1
+version = 3.2
+# شمارهٔ عددی نسخه (versionCode) — هر بار بیلد جدید باید بزرگ‌تر شود
+# تا اندروید نسخهٔ قبلی را واقعاً جایگزین کند (نه اینکه قدیمی را نگه دارد)
+android.numeric_version = 3020000
 
 requirements = python3,kivy==2.3.0,arabic_reshaper,python-bidi==0.4.2,pyjnius
 
