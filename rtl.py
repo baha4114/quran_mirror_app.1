@@ -11,6 +11,27 @@ try:
 except Exception:
     _OK = False
 
+# یک reshaper سفارشی که «چسبِ کلمه‌ایِ الله» (تبدیلِ «الله» به یک نویسهٔ واحد) را خاموش می‌کند.
+# بعضی فونت‌ها (مثل A Ali) گلیفِ آن نویسه را بدونِ الفِ ابتدایی می‌کشند و «الله» به شکلِ «لله» دیده می‌شود.
+# با خاموش‌کردنِ این چسب، «الله» با حروفِ عادی و الفِ سالم نوشته می‌شود؛
+# چسبِ لازمِ «لا» (لام‌الف) دست‌نخورده می‌ماند.
+_reshaper = None
+if _OK:
+    try:
+        _reshaper = arabic_reshaper.ArabicReshaper(configuration={
+            'support_ligatures': 'yes',
+            'ARABIC LIGATURE ALLAH': 'no',
+        })
+    except Exception:
+        _reshaper = None
+
+
+def _reshape(text):
+    if _reshaper is not None:
+        return _reshaper.reshape(text)
+    return arabic_reshaper.reshape(text)
+
+
 _cache = {}
 
 
@@ -24,7 +45,7 @@ def rtl(text):
     if text in _cache:
         return _cache[text]
     try:
-        reshaped = arabic_reshaper.reshape(text)
+        reshaped = _reshape(text)
         out = get_display(reshaped)
     except Exception:
         out = text
