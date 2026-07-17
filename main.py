@@ -115,6 +115,8 @@ def _normalize_item_modes(item):
 # ---- ثبت فونت‌ها ----
 LabelBase.register(name='arabic', fn_regular=asset('font.ttf'), fn_bold=asset('font.ttf'))
 LabelBase.register(name='ui', fn_regular=asset('font.ttf'), fn_bold=asset('font.ttf'))
+# فونتِ مخصوصِ جملهٔ «به نام الله برای الله» (فایلِ A Ali.ttf کنارِ main.py)
+LabelBase.register(name='besmele', fn_regular=asset('A Ali.ttf'), fn_bold=asset('A Ali.ttf'))
 # فونت پیش‌فرض kivy (Roboto) را هم به font.ttf تغییر می‌دهیم تا
 # همهٔ ویجت‌ها (منوی کشویی Spinner، عنوان Popup، دکمه‌های ساده، فایل‌یاب) فارسی را درست نشان دهند.
 LabelBase.register(name='Roboto', fn_regular=asset('font.ttf'), fn_bold=asset('font.ttf'))
@@ -218,7 +220,7 @@ def _text_width(s, font_name, font_size):
 
 
 class RLabel(Label):
-    """لیبل فارسی با شکل‌دهی راست‌به‌چپ و شکستن صحیح خطوط (رفع ��شکل آینه‌ای)."""
+    """لیبل فارسی با شکل‌دهی راست‌به‌چپ و شکستن صحیح خطوط (رفع مشکل آینه‌ای)."""
     def __init__(self, text='', arabic=False, **kw):
         kw.setdefault('font_name', 'arabic' if arabic else 'ui')
         kw.setdefault('color', C_TEXT)
@@ -423,7 +425,7 @@ def show_html_in_app(raw_html):
     """گزارش HTML را داخل خودِ برنامه (پنجرهٔ اسکرول‌شونده) نمایش می‌دهد."""
     text = _html_to_lines(raw_html)
     if not text.strip():
-        toast('محتوایی برای ن��ایش یافت نشد.', 'گزارش')
+        toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
         return
     # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می‌گذاریم.
     # دلیل: روی اندروید یک برچسبِ بسیار بلند، یک بافتِ (texture) گرافیکیِ غول‌آسا می‌سازد
@@ -676,12 +678,15 @@ class HomeScreen(BaseScreen):
 
         # آیهٔ محوری متحرک در نوار بالای صفحه (خاموش‌روشن)
         try:
-            self.header.height = dp(74)
-            self.title_label.font_name = 'arabic'
+            self.header.height = dp(106)
+            self.title_label.font_name = 'besmele'
             self.title_label.color = C_GOLD
-            self.title_label.font_size = '16sp'
+            self.title_label.font_size = '45sp'
             self.title_label.set_text('به نام الله برای الله')
-            _va = (Animation(opacity=0.45, duration=1.8) + Animation(opacity=1, duration=1.8))
+            # کادر شیشه‌ای بماند (بدونِ قابِ زرد)؛ فقط شهابِ نورانی دورش بچرخد
+            orbit_dot(self.header, C_GOLD)
+            # جملهٔ «به نام الله برای الله» نرم خاموش/روشن می‌شود
+            _va = (Animation(opacity=0.4, duration=1.6) + Animation(opacity=1, duration=1.6))
             _va.repeat = True
             _va.start(self.title_label)
         except Exception:
@@ -1065,6 +1070,121 @@ def apply_glow(widget, color=None, speed=1.4):
     anim.start(gc)
     _register_glow(anim, gc, widget)
     return gl
+
+
+def _make_glow_texture(size=64):
+    """یک بافتِ نرمِ نورانی (محو به سمتِ لبه‌ها) برای شهاب می‌سازد."""
+    from kivy.graphics.texture import Texture
+    import math as _m
+    tex = Texture.create(size=(size, size), colorfmt='rgba')
+    c = (size - 1) / 2.0
+    buf = bytearray(size * size * 4)
+    for y in range(size):
+        for x in range(size):
+            dx = (x - c) / c
+            dy = (y - c) / c
+            d2 = dx * dx + dy * dy
+            a = _m.exp(-4.5 * d2) if d2 <= 1.0 else 0.0
+            j = (y * size + x) * 4
+            buf[j] = 255
+            buf[j + 1] = 255
+            buf[j + 2] = 255
+            buf[j + 3] = int(255 * a)
+    tex.blit_buffer(bytes(buf), colorfmt='rgba', bufferfmt='ubyte')
+    tex.mag_filter = 'linear'
+    tex.min_filter = 'linear'
+    return tex
+
+
+_GLOW_TEX = None
+
+
+def _get_glow_tex():
+    global _GLOW_TEX
+    if _GLOW_TEX is None:
+        try:
+            _GLOW_TEX = _make_glow_texture()
+        except Exception:
+            _GLOW_TEX = None
+    return _GLOW_TEX
+
+
+def orbit_dot(widget, color=None, period=5.5):
+    """شهابِ نورانیِ نرم: همهٔ نورها با بافتِ محوشونده (fade) کشیده می‌شوند تا لبهٔ تیز نداشته باشند؛ سرِ درخشان + دنبالهٔ گرادیانی که دورِ لبهٔ کادر می‌چرخد."""
+    import math
+    from kivy.graphics import Color as _Color, Ellipse as _Ellipse
+    col = color or C_GOLD
+    r, g, b = col[0], col[1], col[2]
+    base = dp(14)
+    TRAIL = 30
+    tex = _get_glow_tex()
+    segs = []
+    with widget.canvas.after:
+        # دنبالهٔ گرادیانی: frac=0 نوکِ دم (طلایی/محو)، frac=1 نزدیکِ سر (سفیدِ داغ)
+        for i in range(TRAIL):
+            frac = i / float(TRAIL - 1)
+            mix = frac ** 2
+            cr = r + (1.0 - r) * mix
+            cg = g + (1.0 - g) * mix
+            cb = b + (1.0 - b) * mix
+            a = 0.9 * (frac ** 1.5)
+            _Color(cr, cg, cb, a)
+            e = _Ellipse(texture=tex)
+            segs.append((e, frac))
+        # بلومِ بزرگِ نرمِ دورِ سر
+        _Color(r, g, b, 0.5)
+        bloom = _Ellipse(texture=tex)
+        # مغزِ درخشانِ سفیدتاب
+        _Color(1.0, 0.97, 0.85, 0.95)
+        core = _Ellipse(texture=tex)
+        # جرقهٔ سفیدِ داغِ نوکِ سر
+        _Color(1, 1, 1, 1)
+        spark = _Ellipse(texture=tex)
+    state = {'t': 0.0}
+
+    def _pos(tt, w, h, x0, y0):
+        per = 2.0 * (w + h)
+        d = (tt % 1.0) * per
+        if d < w:
+            return x0 + d, y0
+        d -= w
+        if d < h:
+            return x0 + w, y0 + d
+        d -= h
+        if d < w:
+            return x0 + w - d, y0 + h
+        d -= w
+        return x0, y0 + h - d
+
+    def _put(e, cx, cy, sz):
+        e.pos = (cx - sz / 2.0, cy - sz / 2.0)
+        e.size = (sz, sz)
+
+    def _tick(dt):
+        try:
+            w, h = widget.width, widget.height
+            x0, y0 = widget.x, widget.y
+            if w <= 0 or h <= 0:
+                return
+            state['t'] = (state['t'] + dt / max(0.1, period)) % 1.0
+            t = state['t']
+            per = 2.0 * (w + h)
+            tail_len = (base * 12.0) / per
+            for e, frac in segs:
+                tt = t - tail_len * (1.0 - frac)
+                px, py = _pos(tt, w, h, x0, y0)
+                sz = base * (0.5 + 1.7 * (frac ** 1.3))
+                _put(e, px, py, sz)
+            hx, hy = _pos(t, w, h, x0, y0)
+            twinkle = 1.0 + 0.12 * math.sin(t * 6.2832 * 5)
+            _put(bloom, hx, hy, base * 4.2 * twinkle)
+            _put(core, hx, hy, base * 1.7)
+            _put(spark, hx, hy, base * 0.9)
+        except Exception:
+            pass
+
+    Clock.schedule_interval(_tick, 1 / 60.0)
+    return _tick
 
 
 def verse_card(mode, s, a, arb, pers, is_seed=False, is_fallback=False, reason='',
@@ -2095,6 +2215,12 @@ class OperatorScreen(BaseScreen):
     def refresh(self):
         app = App.get_running_app()
         self.list.clear_widgets()
+        # هر بار که این بخش دوباره باز می‌شود، رندرِ قبلی (اگر در جریان بود) لغو شود
+        self._op_gen = getattr(self, '_op_gen', 0) + 1
+        gen = self._op_gen
+        if getattr(self, '_op_render_ev', None) is not None:
+            self._op_render_ev.cancel()
+            self._op_render_ev = None
         items = app.favs if self.source == 'lab' else app.featured
         key_fn = lab_section_of if self.source == 'lab' else op_of
         matched = [it for it in items if key_fn(it) == self.op_key]
@@ -2103,11 +2229,27 @@ class OperatorScreen(BaseScreen):
                                         halign='center', color=C_MUTED, size_hint_y=None, height=dp(70)))
             return
         last_key = getattr(app, 'last_discovery_key', None)
-        for it in matched:
-            card = self._group_card(it) if 'all_targets' in it else self._card(it)
-            self.list.add_widget(card)
-            if last_key is not None and discovery_key(it) == last_key:
-                apply_glow(card, C_GREEN, speed=0.6)
+        # رندرِ تکه‌تکه: هر فریم چند کارت، تا صفحه فوری باز شود و رابط کاربری قفل نشود
+        queue = list(matched)
+
+        def _add_batch(_dt):
+            if gen != getattr(self, '_op_gen', 0):
+                return  # این بخش دوباره باز شده؛ رندرِ قدیمی را رها کن
+            for _ in range(6):
+                if not queue:
+                    self._op_render_ev = None
+                    return
+                it = queue.pop(0)
+                card = self._group_card(it) if 'all_targets' in it else self._card(it)
+                self.list.add_widget(card)
+                if last_key is not None and discovery_key(it) == last_key:
+                    apply_glow(card, C_GREEN, speed=0.6)
+            if queue:
+                self._op_render_ev = Clock.schedule_once(_add_batch, 0)
+            else:
+                self._op_render_ev = None
+
+        self._op_render_ev = Clock.schedule_once(_add_batch, 0)
 
     def _card(self, item):
         border = C_GOLD if self.source == 'featured' else C_BLUE
@@ -2779,18 +2921,32 @@ class AboutScreen(BaseScreen):
 # راهنما
 # ==================================================================
 class GuideScreen(BaseScreen):
+    # هر بخش: (عنوان، رنگ، توضیحِ کامل و خودآموز)
     SECTIONS = [
-        ('انتخاب بذر (سوره و آیه)', 'در صفحهٔ اصلی شمارهٔ سوره و آیه را وارد کنید. این «بذر» مبنای همهٔ پردازش‌هاست. اگر آیه‌ای خارج از محدوده وارد شود، به نزدیک‌ترین آیهٔ معتبر اصلاح می‌شود.'),
-        ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
-        ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
-        ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
-        ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته باز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
-        ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
-        ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
-        ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
-        ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه یک‌بار پخش می‌شود.'),
-        ('پشتیبان و بازیابی', 'از داده‌های خود (کشفیات، گلچین، برچسب‌ها) نسخهٔ پشتیبان JSON بگیرید تا اطلاعاتتان امن بماند.'),
-        ('درباره', 'معرفی اپلیکیشن و راه‌های ارتباط با مؤلف (سایت مرجع و شناسهٔ پیام‌رسان بله).'),
+        ('۱) انتخاب بذر (سوره و آیه)', C_GOLD,
+         'نقطهٔ شروعِ همه‌چیز اینجاست. در صفحهٔ اصلی شمارهٔ سوره و شمارهٔ آیه را وارد کنید؛ به این جفت «بذر» می‌گوییم و مبنای تمامِ پردازش‌هاست.\nاگر عددی خارج از محدوده وارد کنید، برنامه خودش آن را به نزدیک‌ترین آیهٔ معتبر اصلاح می‌کند تا خطا نگیرید.\nبرای تایپ کافی است روی کادرِ عدد یک‌بار لمس کنید تا کیبورد بالا بیاید.'),
+        ('۲) جستجوی متنِ آیه (در صفحهٔ اصلی)', C_BLUE,
+         'اگر شمارهٔ آیه را نمی‌دانید، از کادرِ «جستجوی متن آیه یا ترجمه» در همان صفحهٔ اصلی استفاده کنید.\nبخشی از متنِ عربی یا ترجمهٔ فارسی را بنویسید (نیازی به اعرابِ دقیق نیست) و «انتخاب خودکار» را بزنید تا نزدیک‌ترین آیه پیدا و به‌عنوان بذر انتخاب شود.\nبا دکمهٔ «نمایش لیست جستجو» همهٔ آیه‌های همخوان را در یک فهرست می‌بینید و یکی را برمی‌گزینید؛ اگر عدد بزنید، بر اساسِ شمارهٔ آیه می‌گردد.\nتوجه: این جستجو در متنِ قرآن است، نه در کشفیاتِ شما.'),
+        ('۳) پردازش ماتریس', C_PURPLE,
+         'قلبِ برنامه. هفت عملگرِ آینه‌ای (جابجایی و تقارنِ شماره‌های سوره و آیه) را روی بذر اجرا می‌کند و هفت آیهٔ «مقصد» به‌دست می‌آید.\nمتنِ کاملِ عربی و ترجمهٔ هر مقصد نمایش داده می‌شود.\nهر مقصدی که برایتان معنادار بود، با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید تا بعداً بررسی‌اش کنید.'),
+        ('۴) پیش‌بینی (معنا)', C_GREEN,
+         'کمک می‌کند از میانِ مقصدها، محتمل‌ترین‌ها را زودتر ببینید.\nمقصدهای آینه‌ای را بر اساسِ اشتراکِ واژه‌ها و نزدیکیِ معناییِ آن‌ها با بذر رتبه‌بندی می‌کند؛ هر چه بالاتر، ارتباطِ معناییِ قوی‌تر.'),
+        ('۵) پیش‌بینی (اعداد)', C_ORANGE,
+         'همان رتبه‌بندی، اما با معیارهای عددی.\nبا فیلترهایی مثلِ نیم‌کرهٔ سوره، اثرِانگشتِ رقمی و میزانِ تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند تا الگوهای عددی راحت‌تر دیده شوند.'),
+        ('۶) لابراتوار کشفیات', C_BLUE,
+         'انبارِ همهٔ کشف‌های ثبت‌شدهٔ شما.\nکشف‌ها خودکار در این دسته‌ها مرتب می‌شوند: هفت عملگرِ آینه‌ای، به‌همراهِ «کشفیات گروهی» (ثبتِ گروهی) و «کشفیات تردیدی».\nروی هر دسته بزنید تا کشف‌های آن باز شود؛ فهرست به‌صورتِ تدریجی و روان بارگذاری می‌شود، پس حتی با هزاران کشف هم صفحه فوری باز می‌شود و معطل نمی‌مانید.\nروی هر کشف بزنید تا پنجرهٔ کامل باز شود: متنِ عربی و ترجمهٔ مبدأ و مقصد، همراه با گلچین‌کردن، ویرایشِ تحلیل و برچسب، حذف و کپی.'),
+        ('۷) گلچین برگزیده', C_GOLD,
+         'ویترینِ بهترین کشف‌های شما.\nکشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مثلِ لابراتوار بر اساسِ همان عملگرها و دسته‌ها (گروهی و تردیدی) مرتب شده و به‌صورتِ روان بارگذاری می‌شود.\nمی‌توانید از کلِ گلچین یک خروجیِ تمیزِ JSON بگیرید.'),
+        ('۸) جستجوی کشفیات', C_PURPLE,
+         'این جستجو با «جستجوی متن آیه» فرق دارد: اینجا فقط داخلِ کشف‌های خودتان (لابراتوار و گلچین) می‌گردد، نه کلِ قرآن.\nهر چیزی را می‌توانید بگردید: متنِ عربی، ترجمه، برچسب، تحلیلِ خودتان و شماره‌ها.\nنتیجه‌ها زنده و همزمان با تایپ نشان داده می‌شوند و حتی با هزاران کشف هم سریع می‌مانند.\nروی هر نتیجه بزنید تا همان پنجرهٔ کاملِ ویرایش باز شود.'),
+        ('۹) مدیریت برچسب‌ها', C_GREEN,
+         'برچسب‌های «رفتارِ آیه» را اینجا می‌سازید یا حذف می‌کنید؛ مثلاً «تقابلِ کامل»، «گفت‌وگو»، «علت و معلول».\nبعداً هنگامِ ثبتِ تحلیلِ یک کشف، این برچسب‌ها را به آن نسبت می‌دهید تا کشف‌هایتان منظم و قابلِ جستجو شوند.'),
+        ('۱۰) رسانه و معرفی', C_ORANGE,
+         'در این بخش «چند کلام از طراح» را می‌شنوید.\nیک معرفیِ صوتیِ کوتاه هنگامِ باز شدنِ برنامه یک‌بار پخش می‌شود و از اینجا هم می‌توانید دوباره آن را بشنوید.'),
+        ('۱۱) پشتیبان و بازیابی', C_BLUE,
+         'برای اینکه دادهٔ شما هیچ‌وقت گم نشود.\nاز کشفیات، گلچین و برچسب‌ها یک فایلِ پشتیبان بگیرید و هر وقت خواستید بازیابی کنید.\nهنگامِ بازیابی، مقصد را انتخاب می‌کنید (لابراتوار یا گلچین) و حالتِ «جایگزینی» یا «ادغام» را برمی‌گزینید؛ کشف‌های تکراری خودکار حذف می‌شوند.'),
+        ('۱۲) درباره', C_PURPLE,
+         'معرفیِ برنامه و راه‌های ارتباط با مؤلف (سایتِ مرجع و شناسهٔ پیام‌رسانِ بله).'),
     ]
 
     def __init__(self, **kw):
@@ -2798,11 +2954,16 @@ class GuideScreen(BaseScreen):
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=dp(8))
         box.bind(minimum_height=box.setter('height'))
-        box.add_widget(RLabel('روی هر بخش بزنید تا توضیح کامل آن باز شود.', font_size='14sp',
+        box.add_widget(RLabel('روی هر بخش بزنید تا توضیحِ کاملِ آن باز شود.', font_size='14sp',
                               color=C_MUTED, halign='center', size_hint_y=None, height=dp(34)))
-        for title, body in self.SECTIONS:
-            b = PillButton(title, bg=(0.16, 0.13, 0.05, 1), size_hint_y=None, height=dp(56), font_size='15sp')
-            b.bind(on_release=lambda inst, t=title, d=body: self.show_help(t, d))
+
+        def _tint(col, f=0.32):
+            return [c * f for c in col[:3]] + [1]
+
+        for title, color, body in self.SECTIONS:
+            b = PillButton(title, bg=_tint(color), size_hint_y=None, height=dp(58), font_size='15sp')
+            _neon_border(b, color, width=1.4, alpha=0.85)
+            b.bind(on_release=lambda inst, t=title, d=body, c=color: self.show_help(t, d, c))
             box.add_widget(b)
         gt = asset('guide_table.png')
         if os.path.exists(gt):
@@ -2811,19 +2972,26 @@ class GuideScreen(BaseScreen):
         scroll.add_widget(box)
         self.body(scroll)
 
-    def show_help(self, title, body):
+    def show_help(self, title, body, color=None):
+        if color is None:
+            color = C_GOLD
         content = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(10))
         sc = ScrollView(do_scroll_x=False, bar_width=dp(4))
-        inner = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(4))
+        inner = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8), padding=dp(4))
         inner.bind(minimum_height=inner.setter('height'))
-        lbl = RLabel(body, font_size='15sp', color=C_TEXT, halign='right', size_hint_y=None)
-        lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(10)))
+        head = RLabel(title, bold=True, font_size='18sp', color=color,
+                      halign='center', size_hint_y=None)
+        head.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(10)))
+        inner.add_widget(head)
+        lbl = RLabel(body, font_size='15sp', color=C_TEXT,
+                     halign='center', size_hint_y=None)
+        lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(12)))
         inner.add_widget(lbl)
         sc.add_widget(inner)
         content.add_widget(sc)
-        p = Popup(title=P(title), content=content, size_hint=(0.92, 0.6),
-                  title_font='ui', title_align='center', separator_color=C_GOLD)
-        btn = PillButton('بستن', bg=C_BLUE, size_hint_y=None, height=dp(46))
+        p = Popup(title=P(title), content=content, size_hint=(0.92, 0.72),
+                  title_font='ui', title_align='center', separator_color=color)
+        btn = PillButton('بستن', bg=color, size_hint_y=None, height=dp(46))
         btn.bind(on_release=p.dismiss)
         content.add_widget(btn)
         p.open()
