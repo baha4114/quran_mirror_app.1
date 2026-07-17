@@ -19,6 +19,10 @@ requirements = python3,kivy==2.3.0,arabic_reshaper,python-bidi==0.4.2,pyjnius
 orientation = portrait
 fullscreen = 0
 
+# حالت واکنش پنجره به کیبورد: adjustResize باعث می‌شود هنگام باز شدن کیبورد، پنجره کوچک شود و
+# باکسِ در حالِ تایپ خودکار بالای کیبورد بیاید (نه زیرش).
+android.window_soft_input_mode = adjustResize
+
 # تصویر صفحهٔ شروع — bg.jpg در ریشهٔ ریپوست (نه داخل assets)
 presplash.filename = %(source.dir)s/bg.jpg
 android.presplash_color = #0d1424
