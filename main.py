@@ -44,6 +44,9 @@ from kivy.utils import platform
 import core
 import features
 from rtl import rtl, rtl_multiline
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.recycleboxlayout import RecycleBoxLayout
+from kivy.uix.recycleview.views import RecycleDataViewBehavior
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # اگر پوشهٔ assets وجود داشته باشد از آن استفاده می‌کنیم؛ وگرنه فایل‌ها را از همین پوشهٔ اصلی می‌خوانیم
@@ -465,16 +468,16 @@ def show_html_in_app(raw_html):
 
 
 class _KbFocusMixin:
-    """رفع مشکل کیبورد اندروید: با یک بار لمس، فوکوس و کیبورد پایدار می‌ماند
-    (به‌جای اینکه کیبورد بالا بیاید و بلافاصله بسته شود)."""
+    """رفع مشکل کیبورد اندروید: آوردنِ خودکارِ باکس به بالای کیبورد."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.bind(focus=self._kb_on_focus)
 
     def _kb_on_focus(self, _inst, val):
-        # وقتی باکس فوکوس می‌گیرد و کیبورد بالا می‌آید، خودکار بالای کیبورد می‌آید
-        if val:
+        # وقتی باکس با لمسِ انگشت فوکوس می‌گیرد، خودکار بالای کیبورد می‌آید
+        # (فقط روی موبایل؛ روی ویندوز/دسکتاپ هیچ کاری لازم نیست و باعثِ جلوگیری از هنگ)
+        if val and _kivy_platform in ('android', 'ios'):
             Clock.schedule_once(self._kb_ensure_visible, 0.35)
             Clock.schedule_once(self._kb_ensure_visible, 0.6)
 
@@ -487,25 +490,29 @@ class _KbFocusMixin:
                     sv = w
                     break
                 w = w.parent
-            if sv is not None:
-                sv.scroll_to(self, padding=dp(72), animate=True)
+            if sv is None:
+                return
+            content = sv.children[0] if sv.children else None
+            if content is None:
+                return
+            ch = content.height
+            vh = sv.height
+            if ch <= vh:
+                return  # محتوا کوتاه‌تر از پنجره است؛ چیزی برای اسکرول نیست
+            # ۱) گوشهٔ پایینِ ویجت در مختصاتِ پنجره (با دادنِ 0,0 دیگر دوبار جمع نمی‌شود)
+            wx, wy = self.to_window(0, 0)
+            # ۲) تبدیل به مختصاتِ محتوای داخلِ اسکرول
+            cx, cy = content.to_local(wx, wy)
+            # ۳) پایینِ باکس حدود ۵۵٪ ارتفاعِ صفحه بالاتر از لبهٔ پایینِ ویوپورت بایستد (بالای کیبورد)
+            gap = vh * 0.55
+            target_viewport_bottom = cy - gap
+            # ۴) تبدیل به نسبتِ اسکرولِ Kivy (بین ۰ و ۱)
+            s = target_viewport_bottom / float(ch - vh)
+            s = max(0.0, min(1.0, s))
+            Animation(scroll_y=s, d=0.25, t='out_quad').start(sv)
         except Exception:
             pass
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            super().on_touch_down(touch)
-            return True
-        return super().on_touch_down(touch)
-
-    def on_touch_up(self, touch):
-        was = (touch.grab_current is self)
-        res = super().on_touch_up(touch)
-        if was or self.collide_point(*touch.pos):
-            def _refocus(dt):
-                if not self.focus:
-                    self.focus = True
-            Clock.schedule_once(_refocus, 0.05)
-        return res
+    # توابع on_touch_down و on_touch_up قبلی حذف شدند (تداخل و کرش با کیبوردِ سیستم).
 
 
 class PlainInput(_KbFocusMixin, TextInput):
@@ -536,6 +543,9 @@ class PersianTextInput(_KbFocusMixin, TextInput):
     def insert_text(self, substring, from_undo=False):
         if self._guard or from_undo:
             return super().insert_text(substring, from_undo=from_undo)
+        # رفع کرش: اگر کیبوردِ اندروید متنِ خالی فرستاد، رندر و جستجو را بی‌دلیل اجرا نکن
+        if not substring:
+            return None
         self._logical += substring
         self._render()
         return None
@@ -971,11 +981,20 @@ class HomeScreen(BaseScreen):
 
         def _load_batch(*a):
             start = state['shown']
-            for r in results[start:start + BATCH]:
-                grid.add_widget(_make_row(r))
-            state['shown'] = min(len(results), start + BATCH)
-            header.set_text('%s — %d از %d' % (head_txt, state['shown'], len(results)))
-            state['loading'] = False
+            chunk = results[start:start + BATCH]
+
+            # رندرِ تکه‌تکهٔ کارت‌ها (هر فریم ۳ کارت) تا پاپ‌آپ هنگام باز شدن گیر نکند
+            def _add_incremental_rows(items):
+                if not items:
+                    state['shown'] = min(len(results), start + BATCH)
+                    header.set_text('%s — %d از %d' % (head_txt, state['shown'], len(results)))
+                    state['loading'] = False
+                    return
+                for r in items[:3]:
+                    grid.add_widget(_make_row(r))
+                Clock.schedule_once(lambda dt: _add_incremental_rows(items[3:]), 0.01)
+
+            _add_incremental_rows(chunk)
 
         def _on_scroll(inst, val):
             # scroll_y=0 یعنی انتهای فهرست؛ نزدیک انتها که رسیدیم دستهٔ بعدی را بیاور
@@ -2228,80 +2247,208 @@ class FeaturedScreen(BaseScreen):
 # ==================================================================
 # جستجو
 # ==================================================================
+class SearchResultCard(RecycleDataViewBehavior, ClickCard):
+    """ردیفِ فشرده و سبکِ نتیجهٔ جستجو. برای دیدنِ جزئیاتِ کامل روی ردیف لمس کنید."""
+    def __init__(self, **kw):
+        kw.setdefault('orientation', 'vertical')
+        kw.setdefault('size_hint_y', None)
+        kw.setdefault('height', dp(62))
+        kw.setdefault('padding', [dp(10), dp(6)])
+        kw.setdefault('spacing', dp(2))
+        kw.setdefault('bg', (0.10, 0.14, 0.22, 1))
+        kw.setdefault('radius', 12)
+        super().__init__(**kw)
+        self._src = ''
+        self._item = None
+        self._top = RLabel('', font_size='12sp', halign='right',
+                           size_hint_y=None, height=dp(20))
+        self._arb = RLabel('', arabic=True, font_size='14sp', halign='right',
+                           color=C_TEXT, size_hint_y=None, height=dp(28))
+        self.add_widget(self._top)
+        self.add_widget(self._arb)
+        self.bind(on_release=self._open)
+
+    def refresh_view_attrs(self, rv, index, data):
+        # فقط متنِ دو لیبلِ موجود به‌روز می‌شود (بدون ساختِ ویدجتِ جدید)
+        self._src = data.get('source', '')
+        self._item = data.get('item')
+        it = self._item or {}
+        tag = 'گلچین' if self._src == 'featured' else 'لابراتوار'
+        self._top.color = C_GOLD if self._src == 'featured' else C_MUTED
+        self._top.set_text('[%s]  سوره %s:%s ↔ سوره %s:%s  %s' % (
+            tag, it.get('seed_s'), it.get('seed_a'),
+            it.get('target_s'), it.get('target_a'), it.get('mode', '') or ''))
+        arb = (it.get('target_arb', '') or it.get('seed_arb', '') or '')
+        arb_s = (arb[:45] + '…') if len(arb) > 45 else arb
+        self._arb.set_text('« %s »' % arb_s)
+        return super().refresh_view_attrs(rv, index, data)
+
+    def _open(self, *a):
+        if self._item is None:
+            return
+        try:
+            screen = App.get_running_app().sm.get_screen('search')
+        except Exception:
+            screen = None
+        show_discovery(self._item, self._src, screen)
+
+
 class SearchScreen(BaseScreen):
+    # حداکثر تعداد نتیجهٔ نمایشی (RecycleView فقط کارت‌های قابل‌مشاهده را می‌سازد)
+    MAX_RESULTS = 200
+
     def __init__(self, **kw):
         super().__init__(title='جستجو در کشفیات', **kw)
         top = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
-        self.q = PersianTextInput(hint_text=P('جستجو در لابراتوار و گلچین...'), font_size='15sp',
+        # با هر تغییرِ متن، جستجوی زنده (با کمی تأخیر) اجرا می‌شود؛ دکمه هم کار می‌کند
+        self.q = PersianTextInput(hint_text=P('جستجو در لابراتوار و گلچین...'),
+                                  on_change=lambda *a: self._schedule_search(),
+                                  font_size='15sp',
                                   background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1),
                                   padding=[dp(8), dp(14)])
-        self.q.bind(on_text_validate=lambda *a: self.do_search())
+        self.q.bind(on_text_validate=lambda *a: self._run_search())
         b = PillButton('جستجو', bg=C_BLUE, size_hint_x=None, width=dp(96), font_size='14sp')
-        b.bind(on_release=lambda *a: self.do_search())
+        b.bind(on_release=lambda *a: self._run_search())
         top.add_widget(self.q)
         top.add_widget(b)
         self.body(top)
         self.info = RLabel('', font_size='13sp', halign='center', color=C_MUTED,
                            size_hint_y=None, height=dp(24))
         self.body(self.info)
-        self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(4))
+        # لیستِ نتایج: همان روشِ مطمئنِ لابراتوار (ScrollView + BoxLayout)؛ کارت‌ها فشرده و سبک‌اند
+        self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(6), scroll_type=['bars', 'content'])
         self.list = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8), padding=dp(4))
         self.list.bind(minimum_height=self.list.setter('height'))
         self.scroll.add_widget(self.list)
         self.body(self.scroll)
+        self._index = []          # ایندکسِ نرمال‌شدهٔ کشفیات: [(source, item, haystack)]
+        self._index_sig = None    # امضای دیتاست برای کش: (len(favs), len(featured))
+        self._search_ev = None    # نوبتِ زمان‌بندی‌شدهٔ جستجو (برای تأخیر و لغو)
 
     def refresh(self):
+        # فهرست را اینجا (روی ترد اصلی) نمی‌سازیم؛ ساختِ سنگین در اولین جستجو و در ترد پس‌زمینه انجام می‌شود
         self.list.clear_widgets()
-        self.info.set_text('متن را وارد کنید و دکمهٔ جستجو را بزنید.')
+        self.info.set_text('واژهٔ عربی/فارسی یا شمارهٔ سوره/آیه را بنویسید؛ نتایج خودکار می‌آید.')
 
-    def _haystack(self, it):
-        parts = [it.get('seed_arb', ''), it.get('target_arb', ''), it.get('seed_pers', ''),
-                 it.get('target_pers', ''), it.get('mode', ''), it.get('relation_type', ''),
-                 it.get('note', ''),
-                 'سوره %s:%s' % (it.get('seed_s'), it.get('seed_a')),
-                 'سوره %s:%s' % (it.get('target_s'), it.get('target_a'))]
-        return core.strip_harakat(' '.join(str(x) for x in parts))
-
-    def do_search(self):
+    def _build_index(self):
         app = App.get_running_app()
-        term = core.strip_harakat(self.q.query.strip())
-        self.list.clear_widgets()
-        if len(term) < 2:
-            self.info.set_text('حداقل ۲ حرف وارد کنید.')
-            return
-        results = []
-        for it in app.favs:
-            if term in self._haystack(it):
-                results.append(('lab', it))
-        for it in app.featured:
-            if term in self._haystack(it):
-                results.append(('featured', it))
-        self.info.set_text('%d نتیجه در لابراتوار و گلچین' % len(results))
-        for source, it in results:
-            self.list.add_widget(self._result_card(source, it))
+        idx = []
+        for source, coll in (('lab', app.favs), ('featured', app.featured)):
+            for it in coll:
+                idx.append((source, it, self._make_hay(it)))
+        self._index = idx
 
-    def _result_card(self, source, item):
-        border = C_GOLD if source == 'featured' else C_BLUE
-        tag = 'گلچین' if source == 'featured' else 'لابراتوار'
-        card = RoundBox(bg=(0.10, 0.14, 0.22, 1), border=border, orientation='vertical',
-                        size_hint_y=None, padding=dp(10), spacing=dp(4))
-        head = RLabel('[%s] %s' % (tag, item.get('mode', '')), bold=True, font_size='13sp',
-                      color=(C_GOLD if source == 'featured' else C_BLUE), halign='right', size_hint_y=None)
-        head.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(4)))
-        card.add_widget(head)
-        pair = RLabel('سوره %s:%s     سوره %s:%s' % (item.get('seed_s'), item.get('seed_a'),
-                      item.get('target_s'), item.get('target_a')),
-                      font_size='12sp', color=C_MUTED, halign='center', size_hint_y=None)
-        pair.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(2)))
-        card.add_widget(pair)
-        a2 = RLabel('« %s »' % item.get('target_arb', ''), arabic=True, font_size='16sp',
-                    halign='center', color=C_TEXT, size_hint_y=None)
-        a2.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(6)))
-        card.add_widget(a2)
-        btn = PillButton('مشاهدهٔ جزئیات', bg=C_BLUE, size_hint_y=None, height=dp(40), font_size='13sp')
-        btn.bind(on_release=lambda *a, it=item, sc=source: show_discovery(it, sc, self))
-        card.add_widget(btn)
-        card.bind(minimum_height=lambda i, v: setattr(card, 'height', v + dp(20)))
+    def _make_hay(self, it):
+        # متنِ جست‌وجوپذیرِ هر کشف: متنِ آیات، ترجمه‌ها، عملگر، برچسب، تحلیل و شماره‌ها
+        parts = [it.get('seed_arb', ''), it.get('target_arb', ''),
+                 it.get('seed_pers', ''), it.get('target_pers', ''),
+                 it.get('mode', ''), it.get('relation_type', ''), it.get('note', '')]
+        nums = 'سوره %s آیه %s سوره %s آیه %s %s:%s %s:%s' % (
+            it.get('seed_s'), it.get('seed_a'), it.get('target_s'), it.get('target_a'),
+            it.get('seed_s'), it.get('seed_a'), it.get('target_s'), it.get('target_a'))
+        combined = ' '.join(str(x) for x in parts) + ' ' + nums
+        # همان نرمال‌سازیِ جستجوی آیه: حذف اعراب + یکسان‌سازیِ حروف (ا/ی/ک/ه) + یکسان‌سازیِ ارقام
+        return core.normalize_text(core.conv(combined))
+
+    def _schedule_search(self, *a):
+        # هم‌سبکِ جستجوی آیه: کارِ جستجو را بی‌درنگ اجرا نمی‌کنیم؛ با کمی تأخیر و لغوِ نوبتِ قبلی،
+        # تا با تایپِ هر حرف، اپ سنگین/هنگ نشود.
+        if self._search_ev is not None:
+            self._search_ev.cancel()
+        self._search_ev = Clock.schedule_once(self._run_search, 0.35)
+
+    def _run_search(self, *a):
+        # لغو زمان‌بندی‌های قبلی هنگام تایپِ سریع
+        if self._search_ev is not None:
+            self._search_ev.cancel()
+            self._search_ev = None
+
+        raw = (self.q.query or '').strip()
+        term = core.normalize_text(core.conv(raw))
+
+        if len(term) < 2:
+            self.list.clear_widgets()
+            self.info.set_text('حداقل ۲ حرف یا یک عدد وارد کنید.')
+            return
+
+        app = App.get_running_app()
+        sig = (len(app.favs), len(app.featured))
+        need_build = (getattr(self, '_index_sig', None) != sig) or (not self._index)
+        self.info.set_text('در حال آماده‌سازی و جستجو...' if need_build else 'در حال جستجو...')
+
+        # هر جستجو یک شمارهٔ نوبت می‌گیرد؛ نتیجهٔ نوبت‌های قدیمی (تایپِ سریع) نادیده گرفته می‌شود
+        self._search_gen = getattr(self, '_search_gen', 0) + 1
+        gen = self._search_gen
+
+        # همهٔ کارِ سنگین (ساختِ فهرست + فیلتر) در ترد پس‌زمینه؛ نمایش با RecycleView آنی است
+        def _do_search():
+            try:
+                if need_build:
+                    idx = []
+                    for source, coll in (('lab', app.favs), ('featured', app.featured)):
+                        for it in coll:
+                            idx.append((source, it, self._make_hay(it)))
+                    self._index = idx
+                    self._index_sig = sig
+                matches = [(src, it) for src, it, hay in self._index if term in hay]
+            except Exception:
+                matches = []
+            Clock.schedule_once(lambda dt: _on_search_done(matches), 0)
+
+        def _on_search_done(matches):
+            if gen != getattr(self, '_search_gen', 0):
+                return  # نتیجهٔ یک جستجوی قدیمی‌ست؛ رهایش کن
+            self.list.clear_widgets()
+            if not matches:
+                self.info.set_text('کشفی همخوان با «%s» یافت نشد.' % raw)
+                return
+            shown = matches[:self.MAX_RESULTS]
+            if len(matches) > self.MAX_RESULTS:
+                self.info.set_text('%d نتیجه — نمایشِ %d موردِ اول (برای کمتر شدن، عبارتِ دقیق‌تری بنویسید).'
+                                   % (len(matches), self.MAX_RESULTS))
+            else:
+                self.info.set_text('%d نتیجه در لابراتوار و گلچین' % len(matches))
+
+            # رندرِ تکه‌تکه: هر فریم چند کارت تا رابط کاربری روان بماند (بدون هنگ حتی با نتایج زیاد)
+            queue = list(shown)
+
+            def _add_batch(_dt):
+                if gen != getattr(self, '_search_gen', 0):
+                    return
+                for _ in range(6):
+                    if not queue:
+                        return
+                    src, it = queue.pop(0)
+                    self.list.add_widget(self._result_row(src, it))
+                if queue:
+                    self._render_ev = Clock.schedule_once(_add_batch, 0)
+
+            if getattr(self, '_render_ev', None) is not None:
+                self._render_ev.cancel()
+            self._render_ev = Clock.schedule_once(_add_batch, 0)
+
+        threading.Thread(target=_do_search, daemon=True).start()
+
+    def _result_row(self, src, it):
+        # کارتِ فشرده و سبکِ نتیجه؛ با کلیک، همان پنجرهٔ ویرایشِ لابراتوار باز می‌شود
+        card = ClickCard(bg=(0.10, 0.14, 0.22, 1),
+                         border=(C_GOLD if src == 'featured' else C_BLUE),
+                         orientation='vertical', size_hint_y=None, height=dp(66),
+                         padding=[dp(10), dp(6)], spacing=dp(2), radius=12)
+        tag = 'گلچین' if src == 'featured' else 'لابراتوار'
+        top = RLabel('[%s]  سوره %s:%s ↔ سوره %s:%s  %s' % (
+            tag, it.get('seed_s'), it.get('seed_a'),
+            it.get('target_s'), it.get('target_a'), it.get('mode', '') or ''),
+            font_size='12sp', halign='right',
+            color=(C_GOLD if src == 'featured' else C_MUTED),
+            size_hint_y=None, height=dp(20))
+        card.add_widget(top)
+        arb = (it.get('target_arb', '') or it.get('seed_arb', '') or '')
+        arb_s = (arb[:45] + '…') if len(arb) > 45 else arb
+        a = RLabel('« %s »' % arb_s, arabic=True, font_size='14sp', halign='right',
+                   color=C_TEXT, size_hint_y=None, height=dp(30))
+        card.add_widget(a)
+        card.bind(on_release=lambda *_a, s=src, i=it: show_discovery(i, s, self))
         return card
 
 
@@ -2696,7 +2843,10 @@ class QuranMirrorApp(App):
         # حالت 'pan' کلِ صفحه را به‌اندازهٔ لازم بالا می‌برد تا باکسِ در حالِ تایپ
         # همیشه بالای کیبورد و در دیدِ کاربر بماند (در همهٔ پنجره‌ها و پاپ‌آپ‌ها).
         try:
-            Window.softinput_mode = 'below_target'
+            # فقط روی موبایل لازم است (تا کیبوردِ صفحه‌ای باکس را نپوشاند)؛
+            # روی ویندوز/دسکتاپ این حالت می‌تواند هنگامِ فوکوسِ باکس باعثِ هنگ/فریز شود.
+            if _kivy_platform in ('android', 'ios'):
+                Window.softinput_mode = 'below_target'
         except Exception:
             pass
         # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستنِ کامل برنامه نادیده گرفته شوند
