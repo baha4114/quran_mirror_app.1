@@ -21,7 +21,7 @@ fullscreen = 0
 
 # حالت واکنش پنجره به کیبورد: adjustResize باعث می‌شود هنگام باز شدن کیبورد، پنجره کوچک شود و
 # باکسِ در حالِ تایپ خودکار بالای کیبورد بیاید (نه زیرش).
-android.window_soft_input_mode = adjustResize
+android.window_soft_input_mode = adjustPan
 
 # تصویر صفحهٔ شروع — bg.jpg در ریشهٔ ریپوست (نه داخل assets)
 presplash.filename = %(source.dir)s/bg.jpg
