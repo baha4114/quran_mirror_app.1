@@ -218,7 +218,7 @@ def _text_width(s, font_name, font_size):
 
 
 class RLabel(Label):
-    """لیبل فارسی با شکل‌دهی راست‌به‌چپ و شکستن صحیح خطوط (رفع مشکل آینه‌ای)."""
+    """لیبل فارسی با شکل‌دهی راست‌به‌چپ و شکستن صحیح خطوط (رفع ��شکل آینه‌ای)."""
     def __init__(self, text='', arabic=False, **kw):
         kw.setdefault('font_name', 'arabic' if arabic else 'ui')
         kw.setdefault('color', C_TEXT)
@@ -423,7 +423,7 @@ def show_html_in_app(raw_html):
     """گزارش HTML را داخل خودِ برنامه (پنجرهٔ اسکرول‌شونده) نمایش می‌دهد."""
     text = _html_to_lines(raw_html)
     if not text.strip():
-        toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
+        toast('محتوایی برای ن��ایش یافت نشد.', 'گزارش')
         return
     # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می‌گذاریم.
     # دلیل: روی اندروید یک برچسبِ بسیار بلند، یک بافتِ (texture) گرافیکیِ غول‌آسا می‌سازد
@@ -477,7 +477,7 @@ class _KbFocusMixin:
     def _kb_on_focus(self, _inst, val):
         # وقتی باکس با لمسِ انگشت فوکوس می‌گیرد، خودکار بالای کیبورد می‌آید
         # (فقط روی موبایل؛ روی ویندوز/دسکتاپ هیچ کاری لازم نیست و باعثِ جلوگیری از هنگ)
-        if val and _kivy_platform in ('android', 'ios'):
+        if False:  # غیرفعال شد: جابه‌جاییِ صفحه هنگامِ فوکوس روی اندروید باعثِ هنگ و سیاه‌شدنِ صفحه می‌شد
             Clock.schedule_once(self._kb_ensure_visible, 0.35)
             Clock.schedule_once(self._kb_ensure_visible, 0.6)
 
@@ -2846,7 +2846,7 @@ class QuranMirrorApp(App):
             # فقط روی موبایل لازم است (تا کیبوردِ صفحه‌ای باکس را نپوشاند)؛
             # روی ویندوز/دسکتاپ این حالت می‌تواند هنگامِ فوکوسِ باکس باعثِ هنگ/فریز شود.
             if _kivy_platform in ('android', 'ios'):
-                Window.softinput_mode = 'below_target'
+                Window.softinput_mode = ''  # جابه‌جایی به عهدهٔ خودِ اندروید (adjustPan)؛ پنل‌کردنِ کیوی باعثِ هنگ/سیاه‌شدن می‌شد
         except Exception:
             pass
         # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستنِ کامل برنامه نادیده گرفته شوند
