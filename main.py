@@ -593,7 +593,7 @@ class HomeScreen(BaseScreen):
             self.title_label.font_name = 'arabic'
             self.title_label.color = C_GOLD
             self.title_label.font_size = '16sp'
-            self.title_label.set_text('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ »')
+            self.title_label.set_text('به نام الله برای الله')
             _va = (Animation(opacity=0.45, duration=1.8) + Animation(opacity=1, duration=1.8))
             _va.repeat = True
             _va.start(self.title_label)
@@ -607,9 +607,9 @@ class HomeScreen(BaseScreen):
         content.add_widget(title)
         content.add_widget(subtitle)
         # نشانهٔ نسخه/بیلد — برای اطمینان از اینکه دقیقاً همین کد روی گوشی اجرا می‌شود
-        build_tag = RLabel('نسخه %s • بیلد %s' % (BUILD_VERSION, BUILD_TAG),
-                           font_size='12sp', halign='center', color=C_GOLD,
-                           size_hint_y=None, height=dp(20))
+        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ »',
+                           arabic=True, font_size='12sp', halign='center', color=C_GOLD,
+                           size_hint_y=None, height=dp(24))
         content.add_widget(build_tag)
 
         # پنل شیشه‌ایِ جستجوی متن آیه یا ترجمه (بدون نیاز به اعراب دقیق)
@@ -1113,7 +1113,7 @@ class MatrixScreen(BaseScreen):
 
     def _render(self):
         self.list.clear_widgets()
-        _prune_glows()   # لغو انیمیشن‌های کارت‌های حذف‌شده تا ترد UI آزاد بماند
+        _prune_glows()   # لغو انیمیشن‌های کارت‌����ای حذف‌شده تا ترد UI آزاد بماند
         self._update_reg_bar()
         if not self._cards:
             self.list.add_widget(RLabel('داده‌ای برای این بذر یافت نشد.', font_size='15sp',
@@ -2732,7 +2732,8 @@ class QuranMirrorApp(App):
         self.last_discovery_key = discovery_key(entry)
         self.last_discovery_section = lab_section_of(entry)
         open_note_editor(entry, 'lab', title='ثبت تحلیل کشف',
-                         intro='کشف در لابراتوار ثبت شد. تحلیل خود را ثبت کنید:')
+                         intro='کشف در لابراتوار ثبت شد. تحلیل خود را ثبت کنید:',
+                         on_saved=lambda: setattr(self, 'last_discovery_section', lab_section_of(entry)))
 
     def add_featured(self, item, screen=None):
         for it in self.featured:
@@ -2742,7 +2743,7 @@ class QuranMirrorApp(App):
                 return
         self.featured.append(dict(item))
         self.save_featured()
-        toast('به گلچین اضافه شد. ', 'گلچین')
+        toast('به گل��ین اضافه شد. ', 'گلچین')
 
     def add_all_featured(self):
         existing = {(it.get('seed_s'), it.get('seed_a'), it.get('target_s'), it.get('target_a'))
@@ -3034,7 +3035,7 @@ class QuranMirrorApp(App):
         return (added, len(dest), '')
 
     def import_from_path(self, path, target='lab', mode='merge'):
-        """بارگذاری امن از یک فایل: هم JSON خام و هم فایل ZIP خروجی ویندوز.
+        """بارگذاری امن از یک فایل: هم JSON خام و ه�� فایل ZIP خروجی ویندوز.
         هرگز کرش نمی‌کند؛ در صورت خطا پیام برمی‌گرداند."""
         import os as _os
         import zipfile as _zip
