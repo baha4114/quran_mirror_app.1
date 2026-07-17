@@ -422,7 +422,7 @@ def show_html_in_app(raw_html):
     if not text.strip():
         toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
         return
-    # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می��گذاریم.
+    # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می‌گذاریم.
     # دلیل: روی اندروید یک برچسبِ بسیار بلند، یک بافتِ (texture) گرافیکیِ غول‌آسا می‌سازد
     # که از حداکثرِ مجازِ GPU بزرگ‌تر می‌شود و «صفحهٔ سیاه/خالی» می‌دهد (روی ویندوز مشکلی ندارد).
     _lines = text.split('\n')
@@ -467,6 +467,30 @@ def show_html_in_app(raw_html):
 class _KbFocusMixin:
     """رفع مشکل کیبورد اندروید: با یک بار لمس، فوکوس و کیبورد پایدار می‌ماند
     (به‌جای اینکه کیبورد بالا بیاید و بلافاصله بسته شود)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.bind(focus=self._kb_on_focus)
+
+    def _kb_on_focus(self, _inst, val):
+        # وقتی باکس فوکوس می‌گیرد و کیبورد بالا می‌آید، خودکار بالای کیبورد می‌آید
+        if val:
+            Clock.schedule_once(self._kb_ensure_visible, 0.35)
+            Clock.schedule_once(self._kb_ensure_visible, 0.6)
+
+    def _kb_ensure_visible(self, _dt):
+        try:
+            w = self.parent
+            sv = None
+            while w is not None:
+                if isinstance(w, ScrollView):
+                    sv = w
+                    break
+                w = w.parent
+            if sv is not None:
+                sv.scroll_to(self, padding=dp(72), animate=True)
+        except Exception:
+            pass
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
             super().on_touch_down(touch)
@@ -640,7 +664,7 @@ class HomeScreen(BaseScreen):
         content = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(6), spacing=dp(12))
         content.bind(minimum_height=content.setter('height'))
 
-        # آیهٔ محوری متحرک در نو��ر بالای صفحه (خاموش‌روشن)
+        # آیهٔ محوری متحرک در نوار بالای صفحه (خاموش‌روشن)
         try:
             self.header.height = dp(74)
             self.title_label.font_name = 'arabic'
@@ -660,7 +684,7 @@ class HomeScreen(BaseScreen):
         content.add_widget(title)
         content.add_widget(subtitle)
         # نشانهٔ نسخه/بیلد — برای اطمینان از اینکه دقیقاً همین کد روی گوشی اجرا می‌شود
-        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظ��ونَ »',
+        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ »',
                            arabic=True, font_size='12sp', halign='center', color=C_GOLD,
                            size_hint_y=None, height=dp(24))
         content.add_widget(build_tag)
@@ -1207,7 +1231,7 @@ class MatrixScreen(BaseScreen):
 
     def _render(self):
         self.list.clear_widgets()
-        _prune_glows()   # لغو انیمیشن‌های کارت‌����ای حذف‌شده تا ترد UI آزاد بماند
+        _prune_glows()   # لغو انیمیشن‌های کارت‌های حذف‌شده تا ترد UI آزاد بماند
         self._update_reg_bar()
         if not self._cards:
             self.list.add_widget(RLabel('داده‌ای برای این بذر یافت نشد.', font_size='15sp',
@@ -1277,7 +1301,7 @@ class MatrixScreen(BaseScreen):
         nav.add_widget(b_prev)
         card.add_widget(nav)
 
-        # دکمهٔ کنش (فقط کار��‌های مقصد)
+        # دکمهٔ کنش (فقط کارت‌های مقصد)
         if not is_seed:
             if self._select_mode == 'pair':
                 picked = idx in self._selected
@@ -1461,7 +1485,7 @@ class PredictScreen(BaseScreen):
     def _open_html(self):
         app = App.get_running_app()
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
-        content.add_widget(RLabel('کد HTML گزارش هوش م��نوعی را اینجا بچسبانید:',
+        content.add_widget(RLabel('کد HTML گزارش هوش مصنوعی را اینجا بچسبانید:',
                                   font_size='14sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(50)))
         ti = PlainInput(multiline=True, font_size='12sp', size_hint_y=1,
                        background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
@@ -1525,7 +1549,7 @@ def op_of(item):
 
 
 def discovery_key(item):
-    """کلید یکتای یک کشف برای تط��یق نئون/آخرین کشف."""
+    """کلید یکتای یک کشف برای تطبیق نئون/آخرین کشف."""
     if 'all_targets' in item:
         return ('G', item.get('seed_s'), item.get('seed_a'), item.get('mode'),
                 tuple((t.get('s'), t.get('a')) for t in item.get('all_targets', [])))
@@ -2277,7 +2301,7 @@ class SearchScreen(BaseScreen):
                     halign='center', color=C_TEXT, size_hint_y=None)
         a2.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(6)))
         card.add_widget(a2)
-        btn = PillButton('مشاهد��ٔ جزئیات', bg=C_BLUE, size_hint_y=None, height=dp(40), font_size='13sp')
+        btn = PillButton('مشاهدهٔ جزئیات', bg=C_BLUE, size_hint_y=None, height=dp(40), font_size='13sp')
         btn.bind(on_release=lambda *a, it=item, sc=source: show_discovery(it, sc, self))
         card.add_widget(btn)
         card.bind(minimum_height=lambda i, v: setattr(card, 'height', v + dp(20)))
@@ -2613,11 +2637,11 @@ class AboutScreen(BaseScreen):
 class GuideScreen(BaseScreen):
     SECTIONS = [
         ('انتخاب بذر (سوره و آیه)', 'در صفحهٔ اصلی شمارهٔ سوره و آیه را وارد کنید. این «بذر» مبنای همهٔ پردازش‌هاست. اگر آیه‌ای خارج از محدوده وارد شود، به نزدیک‌ترین آیهٔ معتبر اصلاح می‌شود.'),
-        ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مق��د را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
+        ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
         ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
         ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
         ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته باز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
-        ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمی�� بگیرید.'),
+        ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
         ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه یک‌بار پخش می‌شود.'),
@@ -2705,7 +2729,7 @@ class QuranMirrorApp(App):
             ExceptionManager.add_handler(_AppGuard())
         except Exception:
             pass
-        # دا��ه
+        # داده
         self.data = core.QuranData(asset('datakavosh.csv'))
         self._init_storage()
         self.load_favs()
@@ -2844,7 +2868,7 @@ class QuranMirrorApp(App):
                 return
         self.featured.append(dict(item))
         self.save_featured()
-        toast('به گل��ین اضافه شد. ', 'گلچین')
+        toast('به گلچین اضافه شد. ', 'گلچین')
 
     def add_all_featured(self):
         existing = {(it.get('seed_s'), it.get('seed_a'), it.get('target_s'), it.get('target_a'))
@@ -3140,7 +3164,7 @@ class QuranMirrorApp(App):
         return (added, len(dest), '')
 
     def import_from_path(self, path, target='lab', mode='merge'):
-        """بارگذاری امن از یک فایل: هم JSON خام و ه�� فایل ZIP خروجی ویندوز.
+        """بارگذاری امن از یک فایل: هم JSON خام و هم فایل ZIP خروجی ویندوز.
         هرگز کرش نمی‌کند؛ در صورت خطا پیام برمی‌گرداند."""
         import os as _os
         import zipfile as _zip
