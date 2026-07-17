@@ -8,6 +8,7 @@ import os
 import json
 import shutil
 import zipfile
+import threading
 from datetime import datetime
 
 from kivy.utils import platform as _kivy_platform
@@ -54,6 +55,58 @@ if not os.path.isdir(ASSET_DIR):
 
 def asset(name):
     return os.path.join(ASSET_DIR, name)
+
+
+def _atomic_write_json(path, data, indent=2):
+    """ذخیرهٔ امن (اتمیک) JSON.
+    اول روی یک فایل موقت نوشته می‌شود و فقط پس از نوشتنِ کاملِ آن، با یک عملیاتِ
+    جایگزینیِ اتمیک روی فایل اصلی می‌نشیند. یک نسخهٔ پشتیبان (.bak) از فایلِ سالمِ
+    قبلی هم نگه داشته می‌شود تا قطع‌شدنِ ناگهانی وسطِ ذخیره، داده را خراب نکند."""
+    import os as _os, json as _json, shutil as _shutil, tempfile as _tempfile
+    directory = _os.path.dirname(_os.path.abspath(path)) or '.'
+    try:
+        if _os.path.exists(path) and _os.path.getsize(path) > 0:
+            _shutil.copy2(path, path + '.bak')
+    except Exception:
+        pass
+    fd, tmp = _tempfile.mkstemp(prefix='.tmp_', suffix='.json', dir=directory)
+    try:
+        with _os.fdopen(fd, 'w', encoding='utf-8') as f:
+            _json.dump(data, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            _os.fsync(f.fileno())
+        _os.replace(tmp, path)
+    except Exception:
+        try:
+            _os.remove(tmp)
+        except Exception:
+            pass
+        raise
+
+
+def normalize_mode(mode_value):
+    """یکسان‌سازی نام عملگر با فرم استانداردِ کوتاه (سازگار با نسخهٔ ویندوز)."""
+    mapping = {
+        "تقارن درجا فقط آیه (سوره ثابت، آیه آینه می‌شود)": "تقارن درجا فقط آیه",
+        "تقارن درجا فقط سوره (آیه ثابت، سوره آینه می‌شود)": "تقارن درجا فقط سوره",
+        "تقارن درجا کامل (آینه‌ی کامل)": "تقارن درجا کامل",
+        "جابجایی کامل (تعویض جای سوره و آیه)": "جابجایی کامل",
+    }
+    return mapping.get(mode_value, mode_value)
+
+
+def _normalize_item_modes(item):
+    """مبدّلِ خودکار: نام عملگرِ یک کشف (و مقصدهای گروهی‌اش) را به فرم استانداردِ کوتاه تبدیل می‌کند، تا فایل‌های قدیمی یا واردشده از ویندوز دقیقاً هم‌راستا شوند."""
+    if not isinstance(item, dict):
+        return item
+    if 'mode' in item:
+        item['mode'] = normalize_mode(item.get('mode', ''))
+    tgts = item.get('all_targets')
+    if isinstance(tgts, list):
+        for t in tgts:
+            if isinstance(t, dict) and 'operator' in t:
+                t['operator'] = normalize_mode(t.get('operator', ''))
+    return item
 
 
 # ---- ثبت فونت‌ها ----
@@ -369,7 +422,7 @@ def show_html_in_app(raw_html):
     if not text.strip():
         toast('محتوایی برای نمایش یافت نشد.', 'گزارش')
         return
-    # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می‌گذاریم.
+    # متن را به قطعه‌های کوچک می‌شکنیم و هر قطعه را در یک برچسبِ جدا می��گذاریم.
     # دلیل: روی اندروید یک برچسبِ بسیار بلند، یک بافتِ (texture) گرافیکیِ غول‌آسا می‌سازد
     # که از حداکثرِ مجازِ GPU بزرگ‌تر می‌شود و «صفحهٔ سیاه/خالی» می‌دهد (روی ویندوز مشکلی ندارد).
     _lines = text.split('\n')
@@ -587,7 +640,7 @@ class HomeScreen(BaseScreen):
         content = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(6), spacing=dp(12))
         content.bind(minimum_height=content.setter('height'))
 
-        # آیهٔ محوری متحرک در نوار بالای صفحه (خاموش‌روشن)
+        # آیهٔ محوری متحرک در نو��ر بالای صفحه (خاموش‌روشن)
         try:
             self.header.height = dp(74)
             self.title_label.font_name = 'arabic'
@@ -607,7 +660,7 @@ class HomeScreen(BaseScreen):
         content.add_widget(title)
         content.add_widget(subtitle)
         # نشانهٔ نسخه/بیلد — برای اطمینان از اینکه دقیقاً همین کد روی گوشی اجرا می‌شود
-        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ »',
+        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظ��ونَ »',
                            arabic=True, font_size='12sp', halign='center', color=C_GOLD,
                            size_hint_y=None, height=dp(24))
         content.add_widget(build_tag)
@@ -784,16 +837,35 @@ class HomeScreen(BaseScreen):
         if not q:
             toast('لطفاً بخشی از متن آیه یا ترجمه را وارد کنید.', 'جستجو')
             return
-        res = app.data.find_by_text(q)
-        if not res:
-            self.verse_meta.set_text('')
-            self.verse_meta.height = dp(0)
-            self.verse.color = C_RED
-            self.verse.set_text('آیه‌ای مطابق این متن یافت نشد')
-            toast('آیه‌ای با این متن پیدا نشد؛ دکمهٔ «نمایش همه» را امتحان کنید.', 'یافت نشد')
+        if getattr(self, '_searching', False):
             return
-        s, a = res
-        self._show_verse_result(s, a)
+        self._searching = True
+
+        def _work():
+            try:
+                res = app.data.find_by_text(q)
+                err = None
+            except Exception as ex:
+                res, err = None, str(ex)
+
+            def _done(dt):
+                self._searching = False
+                if err:
+                    toast('خطا در جستجو: %s' % err, 'خطا')
+                    return
+                if not res:
+                    self.verse_meta.set_text('')
+                    self.verse_meta.height = dp(0)
+                    self.verse.color = C_RED
+                    self.verse.set_text('آیه‌ای مطابق این متن یافت نشد')
+                    toast('آیه‌ای با این متن پیدا نشد؛ دکمهٔ «نمایش همه» را امتحان کنید.', 'یافت نشد')
+                    return
+                s, a = res
+                self._show_verse_result(s, a)
+
+            Clock.schedule_once(_done, 0)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _pick_result(self, s, a, popup=None):
         self._show_verse_result(s, a)
@@ -809,11 +881,33 @@ class HomeScreen(BaseScreen):
         if not q:
             toast('ابتدا واژه یا بخشی از متن را وارد کنید.', 'جستجو')
             return
-        results = app.data.search_all(q, limit=2000)
-        if not results:
-            toast('هیچ آیه‌ای برای این عبارت پیدا نشد.', 'یافت نشد')
+        if getattr(self, '_searching', False):
             return
+        self._searching = True
+        toast('در حال جستجو…', 'لطفاً صبر کنید')
 
+        def _work():
+            try:
+                results = app.data.search_all(q, limit=2000)
+                err = None
+            except Exception as ex:
+                results, err = None, str(ex)
+
+            def _done(dt):
+                self._searching = False
+                if err:
+                    toast('خطا در جستجو: %s' % err, 'خطا')
+                    return
+                if not results:
+                    toast('هیچ آیه‌ای برای این عبارت پیدا نشد.', 'یافت نشد')
+                    return
+                self._build_results_popup(q, results)
+
+            Clock.schedule_once(_done, 0)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _build_results_popup(self, q, results):
         # --- اسکرول بی‌پایان: دستهٔ نخست فوری نمایش، بقیه هنگام اسکرول بارگذاری ---
         is_num = q and core.conv(q).strip().isdigit()
         head_txt = ('%d آیه با شمارهٔ «%s»' % (len(results), q)) if is_num \
@@ -1183,7 +1277,7 @@ class MatrixScreen(BaseScreen):
         nav.add_widget(b_prev)
         card.add_widget(nav)
 
-        # دکمهٔ کنش (فقط کارت‌های مقصد)
+        # دکمهٔ کنش (فقط کار��‌های مقصد)
         if not is_seed:
             if self._select_mode == 'pair':
                 picked = idx in self._selected
@@ -1367,7 +1461,7 @@ class PredictScreen(BaseScreen):
     def _open_html(self):
         app = App.get_running_app()
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
-        content.add_widget(RLabel('کد HTML گزارش هوش مصنوعی را اینجا بچسبانید:',
+        content.add_widget(RLabel('کد HTML گزارش هوش م��نوعی را اینجا بچسبانید:',
                                   font_size='14sp', color=C_GOLD, halign='center', size_hint_y=None, height=dp(50)))
         ti = PlainInput(multiline=True, font_size='12sp', size_hint_y=1,
                        background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
@@ -1431,7 +1525,7 @@ def op_of(item):
 
 
 def discovery_key(item):
-    """کلید یکتای یک کشف برای تطبیق نئون/آخرین کشف."""
+    """کلید یکتای یک کشف برای تط��یق نئون/آخرین کشف."""
     if 'all_targets' in item:
         return ('G', item.get('seed_s'), item.get('seed_a'), item.get('mode'),
                 tuple((t.get('s'), t.get('a')) for t in item.get('all_targets', [])))
@@ -2183,7 +2277,7 @@ class SearchScreen(BaseScreen):
                     halign='center', color=C_TEXT, size_hint_y=None)
         a2.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(6)))
         card.add_widget(a2)
-        btn = PillButton('مشاهدهٔ جزئیات', bg=C_BLUE, size_hint_y=None, height=dp(40), font_size='13sp')
+        btn = PillButton('مشاهد��ٔ جزئیات', bg=C_BLUE, size_hint_y=None, height=dp(40), font_size='13sp')
         btn.bind(on_release=lambda *a, it=item, sc=source: show_discovery(it, sc, self))
         card.add_widget(btn)
         card.bind(minimum_height=lambda i, v: setattr(card, 'height', v + dp(20)))
@@ -2519,11 +2613,11 @@ class AboutScreen(BaseScreen):
 class GuideScreen(BaseScreen):
     SECTIONS = [
         ('انتخاب بذر (سوره و آیه)', 'در صفحهٔ اصلی شمارهٔ سوره و آیه را وارد کنید. این «بذر» مبنای همهٔ پردازش‌هاست. اگر آیه‌ای خارج از محدوده وارد شود، به نزدیک‌ترین آیهٔ معتبر اصلاح می‌شود.'),
-        ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مقصد را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
+        ('پردازش ماتریس', 'هفت عملگر آینه‌ای (جابجایی و تقارن سوره/آیه) را روی بذر اعمال می‌کند و هفت آیهٔ مق��د را با متن کامل عربی و ترجمه نشان می‌دهد. هر مقصد را با دکمهٔ «ثبت این کشف» در لابراتوار ذخیره کنید.'),
         ('پیش‌بینی (معنا)', 'مقاصد آینه‌ای را بر اساس اشتراک واژگانی و ارتباط معنایی با بذر رتبه‌بندی می‌کند تا محتمل‌ترین تناظرها بالاتر بیایند.'),
         ('پیش‌بینی (اعداد)', 'با فیلترهای عددی مانند نیم‌کرهٔ سوره، اثر انگشت رقمی و تلورانس، نامزدهای عددی را غربال و اولویت‌بندی می‌کند.'),
         ('لابراتوار کشفیات', 'همهٔ کشف‌های ثبت‌شدهٔ شما اینجاست و بر اساس هفت عملگر دسته‌بندی شده. روی هر عملگر بزنید تا کشف‌های همان دسته باز شود؛ سپس روی هر کشف بزنید تا جزئیات کامل (عربی + ترجمهٔ مبدأ و مقصد) با امکان گلچین، ویرایش تحلیل، حذف و کپی را ببینید.'),
-        ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمیز بگیرید.'),
+        ('گلچین برگزیده', 'کشف‌های مهم را از لابراتوار به گلچین می‌آورید. اینجا هم مانند لابراتوار بر اساس عملگرها دسته‌بندی شده و می‌توانید از کل گلچین خروجی JSON تمی�� بگیرید.'),
         ('جستجوی آیات', 'در میان کشفیات لابراتوار و گلچین جستجو می‌کند (نه کل قرآن). متن عربی، ترجمه، برچسب و تحلیل شما جستجو می‌شود.'),
         ('مدیریت برچسب‌ها', 'برچسب‌های «رفتار آیه» (مانند تقابل کامل، گفت‌وگو، علت و معلول) را می‌سازید یا حذف می‌کنید تا هنگام ثبت تحلیل به کشف‌ها نسبت دهید.'),
         ('رسانه و معرفی', 'در این بخش «چند کلام از طراح» را می‌شنوید. صدای کوتاه معرفی هنگام باز شدن برنامه یک‌بار پخش می‌شود.'),
@@ -2577,9 +2671,11 @@ class QuranMirrorApp(App):
     def build(self):
         self.title = 'قطب‌نمای قرآنی'
         Window.clearcolor = C_BG
-        # رفع مشکل بالا نیامدن کیبورد + جلوگیری از پوشاندن ورودی توسط کیبورد
+        # رفع مشکل پوشاندنِ باکسِ ورودی توسط کیبورد:
+        # حالت 'pan' کلِ صفحه را به‌اندازهٔ لازم بالا می‌برد تا باکسِ در حالِ تایپ
+        # همیشه بالای کیبورد و در دیدِ کاربر بماند (در همهٔ پنجره‌ها و پاپ‌آپ‌ها).
         try:
-            Window.softinput_mode = 'below_target'
+            Window.softinput_mode = 'pan'
         except Exception:
             pass
         # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستنِ کامل برنامه نادیده گرفته شوند
@@ -2609,7 +2705,7 @@ class QuranMirrorApp(App):
             ExceptionManager.add_handler(_AppGuard())
         except Exception:
             pass
-        # داده
+        # دا��ه
         self.data = core.QuranData(asset('datakavosh.csv'))
         self._init_storage()
         self.load_favs()
@@ -2671,10 +2767,13 @@ class QuranMirrorApp(App):
                 self.favs = json.load(f)
         except Exception:
             self.favs = []
+        if not isinstance(self.favs, list):
+            self.favs = []
+        for _it in self.favs:
+            _normalize_item_modes(_it)
 
     def save_favs(self):
-        with open(self._p('favorites.json'), 'w', encoding='utf-8') as f:
-            json.dump(self.favs, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(self._p('favorites.json'), self.favs, indent=2)
 
     def load_featured(self):
         try:
@@ -2682,10 +2781,13 @@ class QuranMirrorApp(App):
                 self.featured = json.load(f)
         except Exception:
             self.featured = []
+        if not isinstance(self.featured, list):
+            self.featured = []
+        for _it in self.featured:
+            _normalize_item_modes(_it)
 
     def save_featured(self):
-        with open(self._p('featured.json'), 'w', encoding='utf-8') as f:
-            json.dump(self.featured, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(self._p('featured.json'), self.featured, indent=2)
 
     def load_user_tags(self):
         try:
@@ -2695,8 +2797,7 @@ class QuranMirrorApp(App):
             self.user_tags = []
 
     def save_user_tags(self):
-        with open(self._p('user_tags.json'), 'w', encoding='utf-8') as f:
-            json.dump(self.user_tags, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(self._p('user_tags.json'), self.user_tags, indent=2)
 
     def get_all_tags(self):
         tags = set(TagsScreen.DEFAULT) | {'نامشخص'}
@@ -2710,7 +2811,7 @@ class QuranMirrorApp(App):
     # ---------- عملیات کشف ----------
     def add_discovery(self, seed, target):
         entry = {
-            'mode': target.get('mode', ''),
+            'mode': normalize_mode(target.get('mode', '')),
             'seed_s': seed['s'], 'seed_a': seed['a'],
             'seed_arb': seed['arb'], 'seed_pers': seed['pers'],
             'target_s': target['s'], 'target_a': target['a'],
@@ -2813,8 +2914,7 @@ class QuranMirrorApp(App):
 
     def export_clean_json(self, filename, payload):
         out = self._p(filename)
-        with open(out, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(out, payload, indent=2)
         return out
 
     def build_backup_json(self):
@@ -2913,8 +3013,12 @@ class QuranMirrorApp(App):
     def restore_backup(self, payload):
         """بازیابی کشفیات و گلچین از محتوای JSON پشتیبان."""
         favs, featured = features.parse_backup(payload)
-        self.favs = favs
-        self.featured = featured
+        self.favs = favs if isinstance(favs, list) else []
+        self.featured = featured if isinstance(featured, list) else []
+        for _it in self.favs:
+            _normalize_item_modes(_it)
+        for _it in self.featured:
+            _normalize_item_modes(_it)
         self.save_favs()
         self.save_featured()
         return len(favs), len(featured)
@@ -3016,6 +3120,7 @@ class QuranMirrorApp(App):
             it.setdefault('note', '')
             it.setdefault('relation_type', 'نامشخص')
             it.setdefault('is_doubtful', False)
+            _normalize_item_modes(it)
             try:
                 k = discovery_key(it)
             except Exception:
