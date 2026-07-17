@@ -1617,16 +1617,13 @@ def _verse_block(border, s, a, arb, pers):
 
 
 def generate_default_analysis(e):
-    """متن تحلیل پیش‌فرض برای یک کشف تولید می‌کند."""
-    seed_txt = e.get('seed_pers', '') or e.get('seed_arb', '')
-    tgt_txt = e.get('target_pers', '') or e.get('target_arb', '')
+    """متن تحلیل پیش‌فرض یک کشف (هم‌راستا با نسخهٔ ویندوز):
+    فقط نام عملگر و یک یادآوری کوتاه؛ بدون متن آیه و ترجمه، تا باکس تحلیل
+    فقط چیزی باشد که خودِ کاربر می‌نویسد."""
     return (
-        'گره: %s\n'
-        'مبدأ → سوره %s ، آیه %s\n%s\n'
-        'مقصد → سوره %s ، آیه %s\n%s\n'
-        'برداشت اولیه: ارتباط معنایی/عددی میان این دو آیه قابل بررسی است؛ لطفاً تحلیل خود را کامل کنید.'
-        % (e.get('mode', ''), e.get('seed_s'), e.get('seed_a'), seed_txt,
-           e.get('target_s'), e.get('target_a'), tgt_txt))
+        'این کشف بر اساس عملگر «%s» پیشنهاد شده است.\n\n'
+        '(لطفاً تحلیل دقیق خود را از رابطهٔ معنایی این دو آیه یادداشت کنید…)'
+        % (e.get('mode', '') or '—'))
 
 
 def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=None, on_saved=None):
@@ -2699,7 +2696,7 @@ class QuranMirrorApp(App):
         # حالت 'pan' کلِ صفحه را به‌اندازهٔ لازم بالا می‌برد تا باکسِ در حالِ تایپ
         # همیشه بالای کیبورد و در دیدِ کاربر بماند (در همهٔ پنجره‌ها و پاپ‌آپ‌ها).
         try:
-            Window.softinput_mode = 'pan'
+            Window.softinput_mode = 'below_target'
         except Exception:
             pass
         # تور ایمنی: خطاهای پیش‌بینی‌نشده به‌جای بستنِ کامل برنامه نادیده گرفته شوند
