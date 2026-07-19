@@ -128,12 +128,18 @@ C_BG = (0.05, 0.08, 0.14, 1)
 C_PANEL = (1, 1, 1, 0.10)
 C_PANEL_SOLID = (0.10, 0.14, 0.22, 1)
 # نسخه و نشانهٔ بیلد (روی صفحهٔ خانه نشان داده می‌شود) — هر بار کد را عوض کردی این را هم بالا ببر
-BUILD_VERSION = '3.2'
-BUILD_TAG = '2026-07-17'
+BUILD_VERSION = '4.0'
+BUILD_TAG = '2026-07-19'
 
 C_GOLD = (0.95, 0.77, 0.36, 1)
 C_BLUE = (0.15, 0.55, 0.92, 1)
 C_PURPLE = (0.61, 0.28, 0.80, 1)
+C_TEAL = (0.16, 0.70, 0.72, 1)    # turquoise for search
+C_BURG = (0.45, 0.11, 0.19, 1)    # deep burgundy for the number button
+C_GRAPHITE = (0.17, 0.19, 0.23, 1)  # unified refined dark graphite
+C_INDIGO = (0.40, 0.36, 0.78, 1)  # calm indigo for AI section
+C_NAVY = (0.13, 0.20, 0.42, 1)    # deep navy (sormeh-ei)
+C_OLIVE = (0.24, 0.30, 0.13, 1)   # dark murky olive-green
 C_ORANGE = (1.0, 0.60, 0.10, 1)
 C_GREEN = (0.20, 0.72, 0.45, 1)
 C_RED = (0.90, 0.28, 0.28, 1)
@@ -342,6 +348,9 @@ class RoundBox(BoxLayout):
             if self._glass:
                 Color(1, 1, 1, 0.10)
                 self._rim = _Line(width=1.2)
+            # top rim-light for every card (light-from-above glass highlight)
+            Color(1, 1, 1, 0.20)
+            self._toprim = _Line(width=1.3)
         self.bind(pos=self._upd, size=self._upd)
 
     def _upd(self, *a):
@@ -361,6 +370,10 @@ class RoundBox(BoxLayout):
                                                self.width - dp(2), self.height - dp(2), self._radius)
             except Exception:
                 pass
+        if getattr(self, '_toprim', None) is not None:
+            _r = self._radius
+            self._toprim.points = [self.x + _r + dp(2), self.y + self.height - dp(1.5),
+                                   self.x + self.width - _r - dp(2), self.y + self.height - dp(1.5)]
 
     def set_bg(self, color):
         self._col.rgba = color
@@ -384,10 +397,25 @@ class PillButton(Button):
         self._bg = list(bg)
         self._radius = radius
         self._press_ins = 0
+        self._grad = False
         with self.canvas.before:
-            self._col = Color(*self._bg)
+            self._col = Color(1, 1, 1, 1)
             self._rect = RoundedRectangle(radius=[radius])
+        self._refresh_bg()
         self.bind(pos=self._upd, size=self._upd, state=self._state)
+
+    def _refresh_bg(self):
+        bg = self._bg
+        opaque = (len(bg) < 4) or (bg[3] >= 0.5)
+        if opaque:
+            self._grad = True
+            top, bot = _grad_pair(bg)
+            self._rect.texture = _get_grad_tex(top, bot)
+            self._col.rgba = (1, 1, 1, 1)
+        else:
+            self._grad = False
+            self._rect.texture = None
+            self._col.rgba = list(bg)
 
     def _apply_rect(self):
         ins = getattr(self, '_press_ins', 0)
@@ -399,11 +427,14 @@ class PillButton(Button):
 
     def _state(self, *a):
         # بازخوردِ لمسی: دکمه هنگامِ فشار کمی روشن‌تر و کمی فرورفته می‌شود
+        self._refresh_bg()
         if self.state == 'down':
-            self._col.rgba = [min(1, c * 1.25) for c in self._bg[:3]] + [self._bg[3]]
+            if self._grad:
+                self._col.rgba = (0.82, 0.82, 0.82, 1)
+            else:
+                self._col.rgba = [min(1, c * 1.25) for c in self._bg[:3]] + [self._bg[3]]
             self._press_ins = dp(2.5)
         else:
-            self._col.rgba = self._bg
             self._press_ins = 0
         self._apply_rect()
 
@@ -848,17 +879,34 @@ class HomeScreen(BaseScreen):
         except Exception:
             pass
 
-        title = RLabel('قطب‌نمای قرآنی', bold=True, font_size='30sp', halign='center',
+        title = RLabel('قطب‌نمای قرآنی', bold=True, font_size='33sp', halign='center',
                        color=C_TEXT, size_hint_y=None, height=dp(46))
-        subtitle = RLabel('پردازش آینه‌ای (هولوگرافیک)', font_size='15sp', halign='center',
+        subtitle = RLabel('پردازش آینه‌ای (هولوگرافیک)', font_size='14sp', halign='center',
                           color=C_MUTED, size_hint_y=None, height=dp(28))
         content.add_widget(title)
         content.add_widget(subtitle)
+        content.add_widget(Widget(size_hint_y=None, height=dp(10)))
         # نشانهٔ نسخه/بیلد — برای اطمینان از اینکه دقیقاً همین کد روی گوشی اجرا می‌شود
-        build_tag = RLabel('« إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ »',
-                           arabic=True, font_size='12sp', halign='center', color=C_GOLD,
-                           size_hint_y=None, height=dp(24))
-        content.add_widget(build_tag)
+        build_tag = RLabel('﴿ إِنَّا نَحْنُ نَزَّلْنَا الذِّکْرَ وَإِنَّا لَهُ لَحَافِظُونَ ﴾',
+                           arabic=True, bold=True, font_size='18sp', halign='center', color=C_GOLD,
+                           size_hint_y=1)
+        # --- kateebe: glass banner framing the ayah (bigger, ornate, softly glowing) ---
+        ayah_box = RoundBox(bg=(0.05, 0.08, 0.14, 0.45), orientation='vertical',
+                            size_hint=(None, None), height=dp(54), radius=16,
+                            padding=[dp(14), dp(6)], pos_hint={'center_x': 0.5})
+        ayah_box.add_widget(build_tag)
+        content.add_widget(ayah_box)
+        pulse_aura(ayah_box, C_GOLD, alpha=0.6, thickness=0.8)
+        def _fit_ayah(*_a):
+            try:
+                _tw = _text_width(rtl(build_tag._raw), build_tag.font_name, build_tag.font_size)
+            except Exception:
+                _tw = 0
+            if _tw and _tw > 8:
+                ayah_box.width = _tw + dp(52)
+            else:
+                Clock.schedule_once(_fit_ayah, 0.05)
+        Clock.schedule_once(_fit_ayah, 0)
 
         # پنل شیشه‌ایِ جستجوی متن آیه یا ترجمه (بدون نیاز به اعراب دقیق)
         vsbox = RoundBox(bg=(0.05, 0.08, 0.14, 0.62), orientation='vertical',
@@ -875,17 +923,14 @@ class HomeScreen(BaseScreen):
         vbtnrow = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
         vbtn = PillButton('انتخاب خودکار', bg=(1, 1, 1, 0.10), fg=C_TEXT)
         vbtn.bind(on_release=lambda *a: self.search_verse())
-        _neon_border(vbtn, C_BLUE, width=1.4, alpha=0.9)
         vbtn_all = PillButton('نمایش لیست جستجو', bg=(1, 1, 1, 0.10), fg=C_TEXT)
         vbtn_all.bind(on_release=lambda *a: self.show_all_results())
-        _neon_border(vbtn_all, C_GOLD, width=1.4, alpha=0.9)
         vbtnrow.add_widget(vbtn)
         vbtnrow.add_widget(vbtn_all)
         vsbox.add_widget(vbtnrow)
         content.add_widget(vsbox)
-        _neon_border(vsbox, C_BLUE)
         # شهابِ نورانی مثلِ کادرِ بالا، اما کوچک‌تر، کم‌رنگ‌تر و سبک‌تر (دنبالهٔ کوتاه‌تر)
-        self._vs_orbit = orbit_dot(vsbox, C_BLUE, scale=0.7, alpha=0.6, trail=22)
+        self._vs_orbit = pulse_aura(vsbox, C_TEAL, alpha=0.7)
         # هنگامِ تایپ در کادرِ جستجو، شهابِ آن پررنگ می‌شود (المانِ فعال = روشن‌تر)
         self.vs_in.bind(focus=lambda _i, f: self._vs_orbit['set_alpha'](1.0 if f else 0.6))
 
@@ -902,8 +947,7 @@ class HomeScreen(BaseScreen):
         self.verse_box.add_widget(self.verse_meta)
         self.verse_box.add_widget(self.verse)
         content.add_widget(self.verse_box)
-        apply_glow(self.verse_box, C_GOLD)
-        orbit_dot(self.verse_box, C_ORANGE, scale=0.7, alpha=0.6, trail=22)
+        pulse_aura(self.verse_box, C_GOLD)
 
         # پنل ورودی بذر
         seedbox = RoundBox(bg=(1, 1, 1, 0.09), orientation='vertical', size_hint_y=None,
@@ -930,16 +974,15 @@ class HomeScreen(BaseScreen):
         seedbox.add_widget(brow)
 
         prow = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
-        b_sem = PillButton('پیش‌بینی (معنا)', bg=C_PURPLE, fg=HOME_FG)
+        b_sem = PillButton('پیش‌بینی (معنا)', bg=C_GRAPHITE, fg=HOME_FG)
         b_sem.bind(on_release=lambda *a: self.run('semantic'))
-        b_num = PillButton('پیش‌بینی (اعداد)', bg=C_BLUE, fg=HOME_FG)
+        b_num = PillButton('پیش‌بینی (اعداد)', bg=C_GRAPHITE, fg=HOME_FG)
         b_num.bind(on_release=lambda *a: self.run('numeric'))
         prow.add_widget(b_sem)
         prow.add_widget(b_num)
         seedbox.add_widget(prow)
         content.add_widget(seedbox)
-        apply_glow(seedbox, C_GOLD)
-        orbit_dot(seedbox, C_GREEN, scale=0.7, alpha=0.6, trail=22)
+        pulse_aura(seedbox, C_GREEN)
 
         # پنل دستیار هوش مصنوعی: ورود به گفتگو + تنظیمات کلید API
         aibox = RoundBox(bg=(0.05, 0.08, 0.14, 0.62), orientation='vertical', size_hint_y=None,
@@ -947,17 +990,16 @@ class HomeScreen(BaseScreen):
         aibox.add_widget(RLabel('دستیار هوش مصنوعی', bold=True, font_size='16sp',
                                 halign='center', color=C_GOLD, size_hint_y=None, height=dp(26)))
         airow = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
-        b_chat = PillButton('گفتگو با هوش مصنوعی', bg=C_PURPLE, fg=HOME_FG, font_size='15sp')
+        b_chat = PillButton('گفتگو با هوش مصنوعی', bg=C_GRAPHITE, fg=HOME_FG, font_size='15sp')
         b_chat.bind(on_release=lambda *a: self.nav('chat'))
-        b_set = PillButton('تنظیمات', bg=(1, 1, 1, 0.12), fg=C_TEXT, size_hint_x=None,
+        b_set = PillButton('تنظیمات', bg=(0.20, 0.24, 0.32, 1), fg=C_TEXT, size_hint_x=None,
                            width=dp(110), font_size='14sp')
         b_set.bind(on_release=lambda *a: open_ai_settings())
         airow.add_widget(b_chat)
         airow.add_widget(b_set)
         aibox.add_widget(airow)
         content.add_widget(aibox)
-        apply_glow(aibox, C_PURPLE)
-        orbit_dot(aibox, C_PURPLE, scale=0.7, alpha=0.6, trail=22)
+        pulse_aura(aibox, C_INDIGO)
 
         # کاشی‌های ناوبری
         grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(10))
@@ -977,9 +1019,8 @@ class HomeScreen(BaseScreen):
         for label, color, target in nav:
             b = PillButton(label, bg=_tint(color), fg=HOME_FG, size_hint_y=None,
                            height=dp(72), font_size='15sp', radius=16)
-            _neon_border(b, color, width=1.6, alpha=0.85)
             # شهابِ کوچک‌ترِ کم‌رنگ‌تر با دنبالهٔ کوتاه دورِ هر دکمه (سبک‌تر برای CPU چون تعدادشان زیاد است)
-            orbit_dot(b, color, scale=0.45, fps=30, alpha=0.4, trail=12)
+            pulse_aura(b, color, alpha=0.7, thickness=0.85)
             b.bind(on_release=lambda inst, t=target: self.nav(t))
             grid.add_widget(b)
         content.add_widget(grid)
@@ -1394,6 +1435,257 @@ def orbit_dot(widget, color=None, period=5.5, scale=1.0, fps=60, alpha=1.0, trai
     return {'tick': _tick, 'set_alpha': _set_alpha}
 
 
+
+# ==================================================================
+# طراحیِ تازهٔ نورها: هالهٔ تشعشعیِ تپنده + گرادیانِ دکمه‌ها + نورِ چرخانِ دایره‌ای
+# (نرم، تپنده، و سبک برای CPU/GPU؛ جنسِ نور مثلِ دنبالهٔ نرمِ شهاب)
+# ==================================================================
+
+_GRAD_TEX_CACHE = {}
+
+
+def _make_grad_texture(c_top, c_bottom, size=64):
+    # بافتِ گرادیانِ عمودی؛ ردیفِ پایین = c_bottom و ردیفِ بالا = c_top
+    from kivy.graphics.texture import Texture
+    h = size
+    buf = bytearray()
+    for i in range(h):
+        t = i / float(h - 1)
+        r = int(255 * (c_bottom[0] + (c_top[0] - c_bottom[0]) * t))
+        g = int(255 * (c_bottom[1] + (c_top[1] - c_bottom[1]) * t))
+        b = int(255 * (c_bottom[2] + (c_top[2] - c_bottom[2]) * t))
+        a0 = c_bottom[3] if len(c_bottom) > 3 else 1.0
+        a1 = c_top[3] if len(c_top) > 3 else 1.0
+        a = int(255 * (a0 + (a1 - a0) * t))
+        buf += bytes((max(0, min(255, r)), max(0, min(255, g)),
+                      max(0, min(255, b)), max(0, min(255, a))))
+    tex = Texture.create(size=(1, h), colorfmt='rgba')
+    tex.blit_buffer(bytes(buf), colorfmt='rgba', bufferfmt='ubyte')
+    tex.wrap = 'clamp_to_edge'
+    return tex
+
+
+def _grad_pair(bg):
+    # از یک رنگِ پایه، جفت‌رنگِ گرادیانِ چشم‌نواز می‌سازد (بالا روشن‌تر و کمی چرخشِ فام)
+    import colorsys
+    r, g, b = bg[0], bg[1], bg[2]
+    a = bg[3] if len(bg) > 3 else 1.0
+    hh, ll, ss = colorsys.rgb_to_hls(r, g, b)
+    l_top = max(0.0, min(1.0, ll * 0.82 + 0.02))
+    s_top = min(1.0, ss * 1.10 + 0.05)
+    h_top = (hh + 0.02) % 1.0
+    top = colorsys.hls_to_rgb(h_top, l_top, s_top)
+    l_bot = max(0.0, ll * 0.42)
+    s_bot = min(1.0, ss * 1.14 + 0.05)
+    h_bot = (hh - 0.015) % 1.0
+    bot = colorsys.hls_to_rgb(h_bot, l_bot, s_bot)
+    return (top[0], top[1], top[2], a), (bot[0], bot[1], bot[2], a)
+
+
+def _get_grad_tex(top, bot):
+    key = (tuple(round(c, 3) for c in top), tuple(round(c, 3) for c in bot))
+    tex = _GRAD_TEX_CACHE.get(key)
+    if tex is None:
+        try:
+            tex = _make_grad_texture(top, bot)
+        except Exception:
+            tex = None
+        _GRAD_TEX_CACHE[key] = tex
+    return tex
+
+
+def _aura_perim_point(f, w, h, x0, y0):
+    # نقطه‌ای روی محیطِ مستطیل، متناسب با f از 0 تا 1
+    per = 2.0 * (w + h)
+    d = (f % 1.0) * per
+    if d < w:
+        return x0 + d, y0
+    d -= w
+    if d < h:
+        return x0 + w, y0 + d
+    d -= h
+    if d < w:
+        return x0 + w - d, y0 + h
+    d -= w
+    return x0, y0 + h - d
+
+
+def pulse_aura(widget, color=None, speed=2.2, thickness=1.0, hi=0.12, lo=0.03,
+               alpha=1.0, radius=None, thin=None):
+    # حاشیهٔ نورانیِ «بهم‌پیوسته» که دورِ کلِ کادر خاموش/روشن می‌تپد.
+    # همان جنسِ نرمِ دنبالهٔ نور است: چند خطِ گوشه‌گردِ هم‌مرکز با شفافیتِ کم
+    # روی هم می‌نشینند و یک نوارِ نرمِ پیوسته می‌سازند (نه نقطه‌های جدا).
+    # رنگ‌ها تیره‌تر و کم‌نورترند و فقط شفافیت انیمیت می‌شود (بسیار سبک).
+    from kivy.graphics import Color as _Color, Line as _Line
+    col = color or C_GOLD
+    r, g, b = col[0] * 0.78, col[1] * 0.78, col[2] * 0.78
+    LAYERS = 5
+    st = {'built': False, 'lines': [], 'toplines': [], 'col': None, 'core': None, 'top': None,
+          'anim': None, 'anim2': None, 'animt': None, 'rad': radius}
+
+    def _rad():
+        if st['rad'] is not None:
+            return st['rad']
+        return getattr(widget, '_radius', None) or dp(16)
+
+    def _start(mult):
+        c = st.get('col')
+        cc = st.get('core')
+        _h = max(0.0, min(1.0, hi * mult))
+        _l = max(0.0, min(1.0, lo * mult))
+        if c is not None:
+            if st.get('anim') is not None:
+                try:
+                    st['anim'].cancel(c)
+                except Exception:
+                    pass
+            an = (Animation(a=_h, duration=speed, t='in_out_sine')
+                  + Animation(a=_l, duration=speed, t='in_out_sine'))
+            an.repeat = True
+            st['anim'] = an
+            an.start(c)
+            _register_glow(an, c, widget)
+        if cc is not None:
+            if st.get('anim2') is not None:
+                try:
+                    st['anim2'].cancel(cc)
+                except Exception:
+                    pass
+            _hc = max(0.0, min(1.0, _h * 0.9))
+            _lc = max(0.0, min(1.0, _l * 0.9))
+            an2 = (Animation(a=_hc, duration=speed, t='in_out_sine')
+                   + Animation(a=_lc, duration=speed, t='in_out_sine'))
+            an2.repeat = True
+            st['anim2'] = an2
+            an2.start(cc)
+            _register_glow(an2, cc, widget)
+        ct = st.get('top')
+        if ct is not None:
+            if st.get('animt') is not None:
+                try:
+                    st['animt'].cancel(ct)
+                except Exception:
+                    pass
+            _ht = max(0.0, min(1.0, hi * mult * 1.9))
+            _lt = max(0.0, min(1.0, lo * mult * 1.9))
+            ant = (Animation(a=_ht, duration=speed, t='in_out_sine')
+                   + Animation(a=_lt, duration=speed, t='in_out_sine'))
+            ant.repeat = True
+            st['animt'] = ant
+            ant.start(ct)
+            _register_glow(ant, ct, widget)
+
+    def _reposition(*a):
+        if not st['built']:
+            return
+        w, h = widget.width, widget.height
+        if w <= 1 or h <= 1:
+            return
+        rad = _rad()
+        for ln in st['lines']:
+            ln.rounded_rectangle = (widget.x, widget.y, w, h, rad)
+        for ln in st['toplines']:
+            ln.points = [widget.x + rad, widget.y + h,
+                         widget.x + w - rad, widget.y + h]
+
+    def _build(*a):
+        if st['built']:
+            return
+        w, h = widget.width, widget.height
+        if w <= 1 or h <= 1:
+            return
+        rad = _rad()
+        base = dp(0.8)
+        step = dp(1.6) * thickness
+        with widget.canvas.after:
+            st['col'] = _Color(r, g, b, lo * alpha)
+            for _i in range(LAYERS):
+                lw = base + (LAYERS - 1 - _i) * step
+                st['lines'].append(_Line(
+                    rounded_rectangle=(widget.x, widget.y, w, h, rad), width=lw))
+            # neon core line removed: keep the aura soft, dim and thin
+            st['top'] = _Color(min(1.0, r + 0.06), min(1.0, g + 0.06),
+                               min(1.0, b + 0.06), lo * alpha)
+            for _i in range(3):
+                lw = base + (3 - 1 - _i) * step * 1.2
+                st['toplines'].append(_Line(
+                    points=[widget.x + rad, widget.y + h,
+                            widget.x + w - rad, widget.y + h], width=lw))
+        st['built'] = True
+        _reposition()
+        _start(alpha)
+
+    widget.bind(pos=_reposition, size=lambda *a: (_build(), _reposition()))
+    Clock.schedule_once(lambda *a: (_build(), _reposition()), 0)
+
+    return {'set_alpha': lambda m: _start(m), 'state': st}
+
+
+def orbit_ring(widget, color=None, period=3.8, fps=45, trail=20):
+    # نورِ شهابیِ نرم که روی مسیرِ «دایره‌ای» دورِ یک دکمه می‌چرخد،
+    # همراه با هالهٔ مشکیِ نرم دورِ محیطِ دکمه (به‌جای کادرِ مستطیلی).
+    import math
+    from kivy.graphics import Color as _Color, Ellipse as _Ellipse
+    col = color or C_GOLD
+    r, g, b = col[0], col[1], col[2]
+    tex = _get_glow_tex()
+    base = dp(12)
+    TRAIL = max(4, int(trail))
+    segs = []
+    with widget.canvas.after:
+        _Color(0, 0, 0, 0.55)
+        halo = _Ellipse(texture=tex)
+        for i in range(TRAIL):
+            frac = i / float(TRAIL - 1)
+            mix = frac ** 2
+            cr = r + (1.0 - r) * mix
+            cg = g + (1.0 - g) * mix
+            cb = b + (1.0 - b) * mix
+            _Color(cr, cg, cb, 0.9 * (frac ** 1.5))
+            segs.append((_Ellipse(texture=tex), frac))
+        _Color(r, g, b, 0.5)
+        bloom = _Ellipse(texture=tex)
+        _Color(1.0, 0.97, 0.85, 0.95)
+        core = _Ellipse(texture=tex)
+        _Color(1, 1, 1, 1)
+        spark = _Ellipse(texture=tex)
+    state = {'t': 0.0}
+
+    def _put(e, cx, cy, sz):
+        e.pos = (cx - sz / 2.0, cy - sz / 2.0)
+        e.size = (sz, sz)
+
+    def _cpos(f, cx, cy, rad):
+        ang = 2.0 * math.pi * (f % 1.0) - math.pi / 2.0
+        return cx + rad * math.cos(ang), cy + rad * math.sin(ang)
+
+    def _tick(dt):
+        try:
+            w, h = widget.width, widget.height
+            if w <= 0 or h <= 0:
+                return
+            cx, cy = widget.center_x, widget.center_y
+            rad = max(w, h) / 2.0 + dp(7)
+            _put(halo, cx, cy, max(w, h) + dp(34))
+            state['t'] = (state['t'] + dt / max(0.1, period)) % 1.0
+            t = state['t']
+            tail = 0.16
+            for e, frac in segs:
+                tt = t - tail * (1.0 - frac)
+                px, py = _cpos(tt, cx, cy, rad)
+                sz = base * (0.5 + 1.5 * (frac ** 1.3))
+                _put(e, px, py, sz)
+            hx, hy = _cpos(t, cx, cy, rad)
+            _put(bloom, hx, hy, base * 3.4)
+            _put(core, hx, hy, base * 1.6)
+            _put(spark, hx, hy, base * 0.9)
+        except Exception:
+            pass
+
+    Clock.schedule_interval(_tick, 1.0 / max(1, fps))
+    return {'tick': _tick}
+
+
 def verse_card(mode, s, a, arb, pers, is_seed=False, is_fallback=False, reason='',
                on_save=None, score_text='', on_select=None, selected=False):
     bg = (0.16, 0.13, 0.05, 1) if is_seed else ((0.22, 0.08, 0.08, 1) if is_fallback else (0.10, 0.14, 0.22, 1))
@@ -1491,9 +1783,7 @@ class MatrixScreen(BaseScreen):
         self.ai_fab.opacity = 0
         self.ai_fab.disabled = True
         self.root_layout.add_widget(self.ai_fab)
-        _neon_border(self.ai_fab, C_BLUE, width=1.8, alpha=0.95)
-        apply_glow(self.ai_fab, C_BLUE)
-        orbit_dot(self.ai_fab, C_BLUE, scale=0.5, fps=30, alpha=0.9, trail=16)
+        orbit_ring(self.ai_fab, C_BLUE, period=3.6, fps=45, trail=20)
 
     # ---------- حالت پردازش ----------
     def toggle_mode(self):
@@ -2068,7 +2358,7 @@ def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=
     tag_state = {'tag': _cur_tag}
     content.add_widget(RLabel('برچسب تحلیلی (رفتار شبکه) — یکی را انتخاب کنید:', font_size='14sp',
                               color=C_GOLD, size_hint_y=None, height=dp(26)))
-    _chip_sv = ScrollView(size_hint_y=None, height=dp(116), bar_width=dp(4))
+    _chip_sv = ScrollView(size_hint_y=None, height=dp(92), bar_width=dp(4))
     _chip_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(6), padding=(dp(2), dp(2)))
     _chip_grid.bind(minimum_height=_chip_grid.setter('height'))
     _chip_sv.add_widget(_chip_grid)
@@ -2100,7 +2390,7 @@ def open_note_editor(item, source='lab', title='ویرایش تحلیل', intro=
         btog._state()
     btog.bind(on_release=_tog)
     content.add_widget(btog)
-    ep = Popup(title=P(title), content=content, size_hint=(0.94, 0.75),
+    ep = Popup(title=P(title), content=content, size_hint=(0.96, 0.94),
                title_font='ui', title_align='center', separator_color=C_GOLD)
     row2 = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
     sv = PillButton('ذخیره', bg=C_GREEN)
@@ -2341,7 +2631,7 @@ def show_discovery(item, source='lab', screen=None):
             b_status._state()
         b_status.bind(on_release=_tog_status)
         content.add_widget(b_status)
-        ep = Popup(title=P('ویرایش تحلیل'), content=content, size_hint=(0.92, 0.72),
+        ep = Popup(title=P('ویرایش تحلیل'), content=content, size_hint=(0.96, 0.94),
                    title_font='ui', title_align='center', separator_color=C_GOLD)
         row2 = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
         sv = PillButton('ذخیره', bg=C_GREEN)
@@ -3378,6 +3668,19 @@ def open_ai_settings():
                         background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
     box.add_widget(url_in)
 
+    box.add_widget(RLabel('نام مدل (پیشرفته)', bold=True, font_size='15sp', color=C_GOLD,
+                          halign='right', size_hint_y=None, height=dp(26)))
+    model_in = PlainInput(text=cfg.get('model', ai_manager.DEFAULT_MODEL), multiline=False,
+                          font_name='ui', font_size='13sp', size_hint_y=None, height=dp(46),
+                          background_color=(1, 1, 1, 0.95), foreground_color=(0.05, 0.08, 0.14, 1))
+    box.add_widget(model_in)
+    adv = RLabel('پیش‌فرض روی سرویسِ اَوال تنظیم است. برای اتصال به سرویسِ دیگری مثلِ NVIDIA کافیست '
+                 '«آدرس سرور» و «نام مدل» را عوض کنی (برای مثال: nvidia/llama-3.1-nemotron-70b-instruct). '
+                 'توجه: برخی سرورها مثلِ NVIDIA ممکن است از داخلِ ایران بدونِ فیلترشکن پاسخ ندهند.',
+                 font_size='12sp', color=C_MUTED, halign='right', size_hint_y=None)
+    adv.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(8)))
+    box.add_widget(adv)
+
     guide = RLabel('برای استفاده از دستیارِ هوشمند به یک کلیدِ API نیاز داری. برای «شروع»، مؤلف یک کدِ هدیه در اختیارت می‌گذارد؛ اما برای «ادامهٔ» استفاده باید خودت اعتبار تهیه کنی. برای مطالعهٔ بیشتر به سایتِ اَوال سر بزن، و برای دریافتِ کدِ هدیه یا هر پرسشی از طریقِ پیام‌رسانِ «بله» با مؤلف در ارتباط باش.',
                    font_size='12sp', color=C_MUTED, halign='right', size_hint_y=None)
     guide.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + dp(10)))
@@ -3398,22 +3701,21 @@ def open_ai_settings():
     p = Popup(title=P('تنظیمات هوش مصنوعی'), content=content, size_hint=(0.94, 0.9),
               title_font='ui', title_align='center', separator_color=C_GOLD)
 
-    mdl = cfg.get('model', ai_manager.DEFAULT_MODEL)
-
     def _collect():
-        return key_in.text.strip(), url_in.text.strip()
+        return (key_in.text.strip(), url_in.text.strip(),
+                model_in.text.strip() or ai_manager.DEFAULT_MODEL)
 
     def _save():
-        k, u = _collect()
-        app.save_ai_settings(api_key=k, base_url=u, model=mdl)
+        k, u, m = _collect()
+        app.save_ai_settings(api_key=k, base_url=u, model=m)
 
     def _test(*a):
-        k, u = _collect()
+        k, u, m = _collect()
         if not k:
             status.set_text('× ابتدا کلید API را وارد کن')
             toast('کلید API را وارد کن.', 'هوش مصنوعی', kind='warn')
             return
-        app.save_ai_settings(api_key=k, base_url=u, model=mdl)
+        app.save_ai_settings(api_key=k, base_url=u, model=m)
         status.set_text('در حال آزمایش اتصال...')
         b_test.disabled = True
 
@@ -3549,6 +3851,10 @@ class ChatScreen(BaseScreen):
         self._cur_label = None
         self._acc = ''
         self._attach = None      # پیوستِ در انتظارِ ارسال
+        try:
+            self.title_label._fit_single = True
+        except Exception:
+            pass
 
         try:
             gear = PillButton('تنظیمات', bg=(1, 1, 1, 0.14), size_hint_x=None,
