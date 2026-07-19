@@ -199,15 +199,16 @@ def chat(messages, on_delta=None, on_done=None, on_error=None,
                     text = obj["choices"][0]["message"].get("content", "") or ""
                     _ui(on_done, _strip_think(text))
                 return
-            except ssl.SSLError:
-                if not unverified:
-                    continue
-                _ui(on_error, _friendly_error())
-                return
             except urllib.error.HTTPError as e:
                 _ui(on_error, _friendly_error(status=e.code))
                 return
-            except urllib.error.URLError:
+            except (ssl.SSLError, urllib.error.URLError) as e:
+                # روی اندروید بستهٔ گواهی CA نیست؛ خطای گواهی اغلب داخلِ URLError
+                # پیچیده می‌شود؛ پس اگر خطا از نوعِ SSL بود، یک‌بار بدونِ اعتبارسنجی دوباره تلاش می‌کنیم.
+                reason = getattr(e, "reason", None)
+                is_ssl = isinstance(e, ssl.SSLError) or isinstance(reason, ssl.SSLError)
+                if is_ssl and not unverified:
+                    continue
                 _ui(on_error, _friendly_error())
                 return
             except Exception:
