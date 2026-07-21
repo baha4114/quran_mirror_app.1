@@ -49,6 +49,10 @@ _SILENCE = (
 
 
 class HarfbuzzRecipePatched(HarfbuzzRecipe):
+    # میرورِ مطمئن: سرورِ قدیمیِ freedesktop.org گاهی دانلود را با HTTP 418
+    # (anti-bot) بلاک می‌کند و کلِ بیلد را می‌شکند. آدرسِ رسمیِ GitHub پایدار است.
+    url = "https://github.com/harfbuzz/harfbuzz/releases/download/{version}/harfbuzz-{version}.tar.xz"
+
     def get_recipe_env(self, arch=None, **kwargs):
         env = super().get_recipe_env(arch, **kwargs)
         # لایهٔ پشتیبان: هشدارها را به خطا تبدیل نکن.
