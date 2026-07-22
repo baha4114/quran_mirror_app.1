@@ -4557,10 +4557,7 @@ def open_chat_chooser():
     """پنجرهٔ انتخابِ نوعِ گفت‌وگو: گفت‌وگو در موردِ کشفیات یا در موردِ قرآن کریم."""
     app = App.get_running_app()
     content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(10))
-    content.add_widget(RLabel('دربارهٔ چه چیزی گفت‌وگو کنیم؟', bold=True,
-                              font_size='16sp', halign='center', color=C_GOLD,
-                              size_hint_y=None, height=dp(32)))
-
+    
     p = Popup(title=P('گفت‌وگو با هوش مصنوعی'), content=content, size_hint=(0.92, None),
               height=dp(360), title_font='ui', title_align='center', separator_color=C_GOLD)
 
